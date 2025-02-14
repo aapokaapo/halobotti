@@ -1,11 +1,7 @@
 import discord
-from app.tokens import BOT_TOKEN
 from spnkr_app import get_match
 
 bot = discord.Bot()
-
-# we need to limit the guilds for testing purposes
-# so other users wouldn't see the command that we're testing
 
 
 @bot.listen('on_ready', once=True)
@@ -14,8 +10,17 @@ async def startup():
 
 
 @bot.command(description="Sends the bot's latency.") # this decorator makes a slash command
-async def ping(ctx): # a slash command will be created with the name "ping"
-    match = await get_match(match_id="d3f1f6e4-44b9-4f0e-b43c-fe475daf4060")
+async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.respond(f"Pong! Latency is {bot.latency}")
+    match = await get_match(match_id="d3f1f6e4-44b9-4f0e-b43c-fe475daf4060")
+    response = (
+        f"{match.map.public_name}"
+        f" {match.gamemode.public_name}"
+        f" {[player.gamertag for player in match.players]}"
+        f" {match.match_stats.match_id}"
+    )
+    channel = ctx.channel
+    await channel.send(response)
+
 
 
