@@ -13,17 +13,20 @@ from pydantic import BaseModel
 RANKED_PLAYLIST = "edfef3ac-9cbe-4fa2-b949-8f29deafd483"
 
 
+player_cache = None  # Global cache for the player instance
+
 async def get_client():
+    global player_cache
     app = AzureApp(AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI)
 
     async with ClientSession() as session:
-        # refresh_token = await authenticate_player(session, app)
-        # print(refresh_token)
-        player = await refresh_player_tokens(session, app, AZURE_REFRESH_TOKEN)
+        if player_cache is None or not player_cache.is_valid:
+            player_cache = await refresh_player_tokens(session, app, AZURE_REFRESH_TOKEN)
+            
         client = HaloInfiniteClient(
             session=session,
-            spartan_token=f"{player.spartan_token.token}",
-            clearance_token=f"{player.clearance_token.token}",
+            spartan_token=f"{player_cache.spartan_token.token}",
+            clearance_token=f"{player_cache.clearance_token.token}",
             # Optional, default rate is 5.
             requests_per_second=5,
         )
@@ -48,7 +51,7 @@ async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> L
 async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
     resp = await client.stats.get_match_stats(match_id)
     match_stats = await resp.parse()
-    print(match_stats.match_id)
+
     return match_stats
 
 
@@ -75,6 +78,7 @@ async def get_map_asset(client: HaloInfiniteClient, match_stats: MatchStats) -> 
 async def get_match(match_id):
     async for client in get_client():
         match_stats = await get_match_stats(client, match_id)
+        
         map_asset = await get_map_asset(client, match_stats)
         gamemode_asset = await get_gamemode_asset(client, match_stats)
         players = await get_profiles(client, match_stats)
@@ -101,7 +105,7 @@ async def get_match_history(player: str|int, start: int=0, count: int=25, match_
         else:
             results = []
             match_type = "all"
-            while len(results) < count:
+            while len(results) < count and start < 101:
                 response = await client.stats.get_match_history(player, start, count, match_type)
                 match_history = await response.parse()
                 for match in match_history.results:
