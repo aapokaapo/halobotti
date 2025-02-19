@@ -42,7 +42,7 @@ class Match(BaseModel):
 
 
 async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User]:
-    resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players])
+    resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players if player.is_human])
     profiles = await resp.parse()
 
     return profiles
@@ -116,6 +116,13 @@ async def get_match_history(player: str|int, start: int=0, count: int=25, match_
 
             return results
 
+
+async def get_profile(gamertag: str|int):
+    async for client in get_client():
+        resp = await client.profile.get_user_by_gamertag(gamertag)
+        profile = await resp.parse()
+        
+        return profile
 
 
 async def generate_spartan_tokens(AZURE_REFRESH_TOKEN) -> None:
