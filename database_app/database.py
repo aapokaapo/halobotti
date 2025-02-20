@@ -2,27 +2,25 @@ from sqlmodel import SQLModel, create_engine, select
 from sqlmodel.ext.asyncio.session import AsyncSession as Session
 from .models import *
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, InvalidRequestError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite+aiosqlite:///{sqlite_file_name}"
+connect_args = {"check_same_thread": False}
 
-engine = create_async_engine(sqlite_url)
+engine = create_async_engine(sqlite_url, future=True, echo=False, connect_args=connect_args)
 
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-    
-
-async def engine_start():
+async def engine_start() -> None:
     async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
-async def add_custom_player(profile):
-    player = CustomPlayer(gamertag=profile.gamertag, xuid=profile.xuid, custom_matches=[])
-    async with Session(engine) as session:
+async def add_custom_player(profile, is_valid=False):
+    player = CustomPlayer(gamertag=profile.gamertag, xuid=profile.xuid, is_valid=is_valid, custom_matches=[])
+    async with Session(engine, expire_on_commit=False) as session:
         try:
             session.add(player)
             await session.commit()
@@ -30,14 +28,15 @@ async def add_custom_player(profile):
             return player
             
         except IntegrityError as e:
+            await session.rollback()
             raise e
 
 
 async def get_player(gamertag):
-    async with Session(engine) as session:
+    async with Session(engine, expire_on_commit=False) as session:
         statement = select(CustomPlayer).where(CustomPlayer.gamertag == gamertag)
         results = await session.exec(statement)
-        player = results.first()
+        player = results.unique().first()
     
         return player
 
@@ -62,16 +61,23 @@ async def get_players():
         return players
 
 
-async def add_custom_match(match):
+async def get_players_in_the_match(players):
     custom_players = []
-    for player in match.players:
-        # get the custom_player from db by gamertag
+    for player in players:
+        try:
+            await add_custom_player(player)
+        except IntegrityError:
+            pass
         custom_player = await get_player(player.gamertag)
-        # if custom_player doesn't exist in db, create it
-        if not custom_player:
-            custom_player = await add_custom_player(player)
-            custom_players.append(custom_player)
-    
+        custom_players.append(custom_player)
+    print(custom_players)
+
+    return custom_players
+
+
+async def add_custom_match(match):
+
+    custom_players = await get_players_in_the_match(match.players)
     async with Session(engine) as session:
         custom_match = CustomMatch(
             match_id=match.match_stats.match_id,
@@ -84,7 +90,10 @@ async def add_custom_match(match):
             return custom_match
             
         except IntegrityError as e:
+            await session.rollback()
             raise e
+
+
 
 
 async def get_match(match_id):
@@ -107,6 +116,15 @@ async def update_match(match_id, value):
         return match
 
 
+async def get_all_matches():
+    async with Session(engine) as session:
+        statement = select(CustomMatch)
+        results = await session.exec(statement)
+        matches = results.all()
+
+        return matches
+
+
 async def add_channel(guild_id):
     channel = Channel(guild_id=guild_id)
     async with Session(engine) as session:
@@ -117,6 +135,7 @@ async def add_channel(guild_id):
             return channel
         
         except IntegrityError as e:
+            await session.rollback()
             raise e
         
 
@@ -136,3 +155,12 @@ async def update_channel(guild_id, log_channel=None, leaderboard_channel=None):
         await session.refresh(channel)
         
         return channel
+
+
+async def get_all_channels():
+    async with Session(engine) as session:
+        statement = select(Channel)
+        results = await session.exec(statement)
+        channels = results.all()
+
+        return channels

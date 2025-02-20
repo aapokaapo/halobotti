@@ -1,6 +1,7 @@
 import discord
 from spnkr_app import get_match, get_match_history, get_profile
-from database_app.database import add_custom_player, add_custom_match, add_channel, get_player, update_channel, get_players, update_player, engine_start
+from database_app.database import add_custom_player, add_custom_match, add_channel, get_player, update_channel, \
+    get_players, update_player, engine_start, get_all_channels, get_all_matches
 import time
 
 from sqlalchemy.exc import IntegrityError
@@ -12,11 +13,13 @@ bot = discord.Bot()
 
 async def add_channels_to_database():
     async for guild in bot.fetch_guilds():
-        print("Attempting to add channels to db")
         try:
             await add_channel(guild.id)
         except IntegrityError:
-            print("Channel already in db")
+            pass
+
+        channels = await get_all_channels()
+        print(f"Found {len(channels)} channels")
 
 
 @bot.listen('on_ready', once=True)
@@ -39,12 +42,12 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
 
 @bot.command(description="Adds a player to the database")
 @discord.default_permissions(administrator=True)
-async def add_player(ctx, gamertag:str):
+async def add_player(ctx, gamertag:str, is_valid: Optional[bool]):
     
     message = await ctx.respond(f"Yritetään lisätä pelaaja {gamertag} tietokantaan...")
     profile = await get_profile(gamertag)
     try:
-        player = await add_custom_player(profile)
+        player = await add_custom_player(profile, is_valid)
         await message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan")
         
     except IntegrityError:
@@ -68,6 +71,7 @@ async def player_info(ctx, gamertag:str):
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
     profile = await get_profile(gamertag)
     player = await get_player(profile.gamertag)
+    print(player.custom_matches)
     player_data = f"{player.gamertag}-{player.xuid} Pelatut pelit:{len(player.custom_matches)}"
     await message.edit(content=player_data)
     
@@ -95,7 +99,7 @@ async def find_all_custom_matches(player):
     for match in match_history:
         custom_match = await get_match(match.match_id)
         try:
-            await add_custom_match(custom_match)
+            custom_match = await add_custom_match(custom_match)
             await check_match_validity(custom_match)
             print("New match added")
         except IntegrityError:
@@ -111,6 +115,8 @@ async def populate_database(ctx):
     if custom_players:
         for player in custom_players:
             await find_all_custom_matches(player)
-    await ctx.send("Valmis")
+
+    matches = await get_all_matches()
+    await ctx.send(f"Valmis!\nTietokannassa on {len(matches)} custom-matsia")
     
 
