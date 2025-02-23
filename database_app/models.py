@@ -1,3 +1,4 @@
+from email.policy import default
 from typing import List, Optional
 import uuid
 
@@ -23,6 +24,7 @@ class CustomPlayer(SQLModel, table=True):
     xuid: str = Field(unique=True)
     custom_matches: List[CustomMatch] = Relationship(back_populates="players", link_model=LinkTable, sa_relationship_kwargs={"lazy": "joined"},)
     is_valid: bool = False
+    validation_message: bool = False
 
 
 class Channel(SQLModel, table=True):

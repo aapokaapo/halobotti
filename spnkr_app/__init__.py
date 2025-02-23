@@ -1,12 +1,12 @@
 import asyncio
 
 from app.tokens import AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI, AZURE_REFRESH_TOKEN
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientResponseError
 from spnkr import HaloInfiniteClient, AzureApp, refresh_player_tokens, authenticate_player
 from spnkr.models.stats import MatchStats
 from spnkr.models.discovery_ugc import Asset, Map, UgcGameVariant
 from spnkr.models.profile import User
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Optional
 from pydantic import BaseModel
 
 
@@ -37,50 +37,94 @@ async def get_client():
 class Match(BaseModel):
     match_stats: MatchStats
     players: List[User]
-    map: Asset
-    gamemode: Asset
+    map: Optional[Asset]
+    gamemode: Optional[Asset]
 
 
 async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User]:
-    resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players if player.is_human])
-    profiles = await resp.parse()
+    tries = 0
+    while tries < 3:
+        try:
+            resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players if player.is_human])
+            profiles = await resp.parse()
 
-    return profiles
+            return profiles
+
+        except ClientResponseError as e:
+            if tries == 3:
+                raise e
+            else:
+                tries += 1
 
 
 async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
-    resp = await client.stats.get_match_stats(match_id)
-    match_stats = await resp.parse()
+    tries = 0
+    while tries < 3:
+        try:
+            resp = await client.stats.get_match_stats(match_id)
+            match_stats = await resp.parse()
 
-    return match_stats
+            return match_stats
+
+        except ClientResponseError as e:
+            if tries == 3:
+                raise e
+            else:
+                tries += 1
+
 
 
 async def get_gamemode_asset(client: HaloInfiniteClient, match_stats: MatchStats) -> UgcGameVariant:
-    resp = await client.discovery_ugc.get_ugc_game_variant(
-        match_stats.match_info.ugc_game_variant.asset_id,
-        match_stats.match_info.ugc_game_variant.version_id
-    )
-    gamemode_asset = await resp.parse()
+    tries = 0
+    while tries < 3:
+        try:
+            resp = await client.discovery_ugc.get_ugc_game_variant(
+                match_stats.match_info.ugc_game_variant.asset_id,
+                match_stats.match_info.ugc_game_variant.version_id
+            )
+            gamemode_asset = await resp.parse()
 
-    return gamemode_asset
+            return gamemode_asset
+
+        except ClientResponseError as e:
+            if tries == 3:
+                raise e
+            else:
+                tries += 1
 
 
 async def get_map_asset(client: HaloInfiniteClient, match_stats: MatchStats) -> Map:
-    resp = await client.discovery_ugc.get_map(
-        match_stats.match_info.map_variant.asset_id,
-        match_stats.match_info.map_variant.version_id
-    )
-    map_asset = await resp.parse()
+    tries = 0
+    while tries < 3:
+        try:
+            resp = await client.discovery_ugc.get_map(
+                match_stats.match_info.map_variant.asset_id,
+                match_stats.match_info.map_variant.version_id
+            )
+            map_asset = await resp.parse()
 
-    return map_asset
+            return map_asset
+
+        except ClientResponseError as e:
+            if tries == 3:
+                raise e
+            else:
+                tries += 1
 
 
 async def get_match(match_id):
     async for client in get_client():
         match_stats = await get_match_stats(client, match_id)
-        
-        map_asset = await get_map_asset(client, match_stats)
-        gamemode_asset = await get_gamemode_asset(client, match_stats)
+
+        try:
+            map_asset = await get_map_asset(client, match_stats)
+        except ClientResponseError:
+            map_asset = None
+        try:
+            gamemode_asset = await get_gamemode_asset(client, match_stats)
+        except ClientResponseError:
+            gamemode_asset = None
+
         players = await get_profiles(client, match_stats)
 
         match = Match(
@@ -97,32 +141,61 @@ async def get_match_history(player: str|int, start: int=0, count: int=25, match_
 
     async for client in get_client():
         if match_type != "ranked":
-            response = await client.stats.get_match_history(player, start, count, match_type)
-            match_history = await response.parse()
+            tries = 0
+            while tries < 3:
+                try:
+                    response = await client.stats.get_match_history(player, start, count, match_type)
+                    match_history = await response.parse()
 
-            return match_history.results
+                    return match_history.results
+
+                except ClientResponseError as e:
+                    if tries == 3:
+                        raise e
+                    else:
+                        tries += 1
 
         else:
             results = []
             match_type = "all"
-            while len(results) < count and start < 101:
-                response = await client.stats.get_match_history(player, start, count, match_type)
-                match_history = await response.parse()
-                for match in match_history.results:
-                    if match.match_info.playlist.asset_id == RANKED_PLAYLIST:
-                        results.append(match)
+            tries = 0
+            while tries < 3:
+                try:
+                    while len(results) < count:
+                        response = await client.stats.get_match_history(player, start, count, match_type)
+                        match_history = await response.parse()
+                        for match in match_history.results:
+                            if match.match_info.playlist.asset_id == RANKED_PLAYLIST:
+                                results.append(match)
+                                if len(results) == count:
+                                    return results
 
-                start += 25
+                        start += 25
 
-            return results
+                    return results
+
+                except ClientResponseError as e:
+                    if tries == 3:
+                        raise e
+                    else:
+                        tries += 1
 
 
 async def get_profile(gamertag: str|int):
     async for client in get_client():
-        resp = await client.profile.get_user_by_gamertag(gamertag)
-        profile = await resp.parse()
-        
-        return profile
+        tries = 0
+        while tries < 3:
+            try:
+                resp = await client.profile.get_user_by_gamertag(gamertag)
+                profile = await resp.parse()
+
+                return profile
+
+            except ClientResponseError as e:
+                if tries == 3:
+                    raise e
+                else:
+                    tries += 1
 
 
 async def generate_spartan_tokens(AZURE_REFRESH_TOKEN) -> None:

@@ -1,6 +1,11 @@
 import discord
+
 from spnkr_app import get_match, get_match_history, get_profile
-from database_app.database import add_custom_player, add_custom_match, add_channel, get_player, update_channel, get_players, update_player, engine_start, get_all_channels, get_all_matches, add_match_to_players
+from database_app.database import (
+    add_custom_player, add_custom_match, add_channel, get_player, update_channel,
+    get_players, update_player, engine_start, get_all_channels,
+    get_all_matches, add_match_to_players, add_players_in_match, get_log_channel
+)
 import time
 
 from sqlalchemy.exc import IntegrityError
@@ -32,11 +37,11 @@ async def startup():
 async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.respond(f"Pong! Latency is {bot.latency}")
     start = time.time()
-    match = await get_match(match_id="d3f1f6e4-44b9-4f0e-b43c-fe475daf4060")
+    match_history = await get_match_history("AapoKaapo",999,25,"custom")
+    print(match_history)
     end = time.time()
     
     print("Took %f ms" % ((end - start) * 1000.0))
-    
 
 
 @bot.command(description="Adds a player to the database")
@@ -51,18 +56,63 @@ async def add_player(ctx, gamertag:str, is_valid: Optional[bool]):
         
     except IntegrityError:
         await message.edit(content=f"Pelaaja {gamertag} on jo tietokannassa")
-    
+
+
+
+class AddPlayerView(discord.ui.View):
+
+    def __init__(self, profile, is_valid, timeout, disable_on_timeout=False):
+        self.is_valid = is_valid
+        self.profile = profile
+        super().__init__(timeout=timeout, disable_on_timeout=disable_on_timeout)
+
+    @discord.ui.button(
+        label="Lisää Pelaaja",
+        style=discord.ButtonStyle.grey,
+    )
+    async def add_player_button(self, button, interaction):
+        try:
+            player = await add_custom_player(self.profile, self.is_valid)
+            await self.message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan", view=None)
+
+        except IntegrityError:
+            await self.message.edit(content=f"Pelaaja {self.profile.gamertag} on jo tietokannassa", view=None)
+
+        self.clear_items()
+        self.stop()
+
+
+    @discord.ui.button(
+        label="Älä Lisää Pelaajaa",
+        style=discord.ButtonStyle.grey,
+    )
+    async def player_not_added(self, button, interaction):
+        self.clear_items()
+        await self.message.edit(content=f"Pelaajaa {self.profile.gamertag} ei lisätty tietokantaan", view=None)
+        self.stop()
+
+
+    async def on_timeout(self):
+        self.clear_items()
+        await self.message.edit(content=f"Et vastannut ajoissa. Pelaajaa {self.profile.gamertag} ei lisätty", view=None)
+
 
 @bot.command(name="update_player", description="Update a player in the database")
 @discord.default_permissions(administrator=True)
 async def _update_player(ctx, gamertag: str, is_valid: bool):
     message = await ctx.respond(f"Yritetään päivittää pelaajan {gamertag} tilaa")
     profile = await get_profile(gamertag)
-    player = await update_player(profile.gamertag, is_valid)
-    
-    # tähän vois kehittää koodin, joka ehdottaa pelaajan lisäämistä jos ei löydy tietokannasta. Koodi voisi kutsua add_player funktiota yllä.
-    
-    await message.edit(content=f"Päivitetty pelaajan {player.gamertag} tilaksi {player.is_valid}")
+    if profile:
+        player = await update_player(profile.gamertag, is_valid)
+        if player:
+            await message.edit(content=f"Päivitetty pelaajan {player.gamertag} tilaksi {player.is_valid}")
+        else:
+            await message.edit(
+                content=f"Pelaajaa {profile.gamertag} ei löytynyt tietokannasta. Haluatko lisätä pelaajan?",
+                view=AddPlayerView(profile, is_valid, timeout=30)
+            )
+    else:
+        await message.edit(content=f"Pelaajaa {gamertag} ei löydy Microsoft Xbox -palvelusta. Kirjoititko nimen oikein?")
     
     
 @bot.command(description="Get player info")
@@ -70,7 +120,6 @@ async def player_info(ctx, gamertag:str):
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
     profile = await get_profile(gamertag)
     player = await get_player(profile.gamertag)
-    print(player.custom_matches)
     player_data = f"{player.gamertag}-{player.xuid} Pelatut pelit:{len(player.custom_matches)}"
     await message.edit(content=player_data)
     
@@ -89,21 +138,62 @@ async def set_log_channel(ctx, channel_id: Optional[int]=None):
 
 
 async def check_match_validity(custom_match):
+    # if there are exactly 8 players in the game, who are is_valid -> valid
+    # if the gamemode is one of the ranked modes -> valid
+    # if the match finished either by_time or by_score-> valid
+    #
     pass
 
 
+class ValidatePlayerView(discord.ui.View):
+    def __init__(self, custom_player, timeout):
+        self.custom_player = custom_player
+        super().__init__(timeout=timeout)
+
+    @discord.ui.button(
+        label="On 8s Suomi Custom-pelaaja",
+        style=discord.ButtonStyle.grey,
+    )
+    async def validate_player_button(self, button, interaction):
+        custom_player = await update_player(self.custom_player.gamertag, value=True)
+        await self.message.edit(content=f"Päivitetty pelaajan {custom_player.gamertag} tilaksi {custom_player.is_valid}", view=None)
+        self.stop()
+
+    @discord.ui.button(
+        label="Ei ole 8s Suomi Custom-pelaaja",
+        style=discord.ButtonStyle.grey,
+    )
+    async def do_not_validate_player_button(self, button, interaction):
+        await self.message.edit(content=f"Pelaajan {self.custom_player.gamertag} tila on {self.custom_player.is_valid}", view=None)
+        self.stop()
+
+
+
 async def find_all_custom_matches(player):
-    match_history = await get_match_history(player.gamertag, match_type='custom')
-    custom_matches = []
-    for match in match_history:
-        custom_match = await get_match(match.match_id)
-        await check_match_validity(custom_match)
-        try:
-            await add_custom_match(custom_match)
-            await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
-            print("added new match to db")
-        except IntegrityError:
-            print("match already in db")
+    start = 100
+    while True:
+        print(start)
+        match_history = await get_match_history(player.gamertag,start=start, match_type='custom')
+        if len(match_history) == 0:
+            return
+        for match in match_history:
+            custom_match = await get_match(match.match_id)
+            await check_match_validity(custom_match)
+            custom_players = await add_players_in_match(custom_match)
+            for player in custom_players:
+                if not player.is_valid and not player.validation_message:
+                    await update_player(player.gamertag, player.is_valid, validation_message=True)
+                    guild = await get_log_channel()
+                    channel = await bot.fetch_channel(guild.log_channel_id)
+                    message = await channel.send(content=f"Hyväksytäänkö pelaaja {player.gamertag}", view=ValidatePlayerView(player, timeout=None))
+
+            try:
+                await add_custom_match(custom_match)
+                await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
+                print("added new match to db")
+            except IntegrityError:
+                print("match already in db")
+        start += 25
        
 
 @bot.command(description="Populate database with custom matches")

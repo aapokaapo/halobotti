@@ -42,11 +42,13 @@ async def get_player(gamertag):
         return player
 
 
-async def update_player(gamertag, value):
+async def update_player(gamertag, value, validation_message=False):
     async with Session(engine, expire_on_commit=False) as session:
         player = await get_player(gamertag)
         if player:
             player.is_valid = value
+            if validation_message:
+                player.validation_message = validation_message
             session.add(player)
             await session.commit()
             await session.refresh(player)
@@ -62,7 +64,7 @@ async def get_players():
         return players
 
 
-async def get_players_in_match(match):
+async def add_players_in_match(match):
     custom_players = []
     for player in match.players:
         try:
@@ -74,21 +76,7 @@ async def get_players_in_match(match):
     return custom_players
 
 
-async def add_players(players, match):
-    async with Session(engine, expire_on_commit=False) as session:
-        statement = select(CustomMatch).where(CustomMatch.match_id == match.match_stats.match_id)
-        results = await session.exec(statement)
-        custom_match = results.first()
-        custom_match.players = players
-        session.add(custom_match)
-        await session.commit()
-        await session.refresh(custom_match)
-        
-        return custom_match
-
-
 async def add_custom_match(match):
-    await get_players_in_match(match)
 
     async with Session(engine, expire_on_commit=False) as session:
         custom_match = CustomMatch(
@@ -104,8 +92,6 @@ async def add_custom_match(match):
         except IntegrityError as e:
             await session.rollback()
             raise e
-
-
 
 
 async def get_match(match_id):
@@ -176,6 +162,15 @@ async def update_channel(guild_id, log_channel=None, leaderboard_channel=None):
         await session.commit()
         await session.refresh(channel)
         
+        return channel
+
+
+async def get_log_channel():
+    async with Session(engine) as session:
+        statement = select(Channel)
+        results = await session.exec(statement)
+        channel = results.first()
+
         return channel
 
 
