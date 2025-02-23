@@ -1,9 +1,10 @@
 from sqlmodel import SQLModel, create_engine, select
 from sqlmodel.ext.asyncio.session import AsyncSession as Session
+from sqlalchemy.ext.asyncio import create_async_engine
 from .models import *
 
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
-from sqlalchemy.ext.asyncio import create_async_engine
+
 
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite+aiosqlite:///{sqlite_file_name}"
@@ -33,7 +34,7 @@ async def add_custom_player(profile, is_valid=False):
 
 
 async def get_player(gamertag):
-    async with Session(engine, expire_on_commit=False) as session:
+    async with Session(engine) as session:
         statement = select(CustomPlayer).where(CustomPlayer.gamertag == gamertag)
         results = await session.exec(statement)
         player = results.unique().first()
@@ -42,7 +43,7 @@ async def get_player(gamertag):
 
 
 async def update_player(gamertag, value):
-    async with Session(engine) as session:
+    async with Session(engine, expire_on_commit=False) as session:
         player = await get_player(gamertag)
         if player:
             player.is_valid = value
@@ -57,31 +58,42 @@ async def get_players():
     async with Session(engine) as session:
         statement = select(CustomPlayer).where(CustomPlayer.is_valid == True)
         results = await session.exec(statement)
-        players = results.all()
+        players = results.unique().all()
         return players
 
 
-async def get_players_in_the_match(players):
+async def get_players_in_match(match):
     custom_players = []
-    for player in players:
+    for player in match.players:
         try:
             await add_custom_player(player)
         except IntegrityError:
             pass
         custom_player = await get_player(player.gamertag)
         custom_players.append(custom_player)
-    print(custom_players)
-
     return custom_players
 
 
-async def add_custom_match(match):
+async def add_players(players, match):
+    async with Session(engine, expire_on_commit=False) as session:
+        statement = select(CustomMatch).where(CustomMatch.match_id == match.match_stats.match_id)
+        results = await session.exec(statement)
+        custom_match = results.first()
+        custom_match.players = players
+        session.add(custom_match)
+        await session.commit()
+        await session.refresh(custom_match)
+        
+        return custom_match
 
-    custom_players = await get_players_in_the_match(match.players)
-    async with Session(engine) as session:
+
+async def add_custom_match(match):
+    await get_players_in_match(match)
+
+    async with Session(engine, expire_on_commit=False) as session:
         custom_match = CustomMatch(
             match_id=match.match_stats.match_id,
-            players=custom_players
+            players=[]
         )
         try:
             session.add(custom_match)
@@ -100,7 +112,7 @@ async def get_match(match_id):
     async with Session(engine) as session:
         statement = select(CustomMatch).where(CustomMatch.match_id == match_id)
         results = await session.exec(statement)
-        match = results.one()
+        match = results.unique().one()
     
         return match
 
@@ -120,9 +132,19 @@ async def get_all_matches():
     async with Session(engine) as session:
         statement = select(CustomMatch)
         results = await session.exec(statement)
-        matches = results.all()
+        matches = results.unique().all()
 
         return matches
+
+
+async def add_match_to_players(custom_match_id, players):
+    async with Session(engine) as session:
+        match = await get_match(custom_match_id)
+        for player in players:
+            custom_player = await get_player(player.gamertag)
+            custom_player.custom_matches.append(match)
+            session.add(custom_player)
+            await session.commit()
 
 
 async def add_channel(guild_id):

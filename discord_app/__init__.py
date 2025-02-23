@@ -1,7 +1,6 @@
 import discord
 from spnkr_app import get_match, get_match_history, get_profile
-from database_app.database import add_custom_player, add_custom_match, add_channel, get_player, update_channel, \
-    get_players, update_player, engine_start, get_all_channels, get_all_matches
+from database_app.database import add_custom_player, add_custom_match, add_channel, get_player, update_channel, get_players, update_player, engine_start, get_all_channels, get_all_matches, add_match_to_players
 import time
 
 from sqlalchemy.exc import IntegrityError
@@ -95,16 +94,17 @@ async def check_match_validity(custom_match):
 
 async def find_all_custom_matches(player):
     match_history = await get_match_history(player.gamertag, match_type='custom')
-    
+    custom_matches = []
     for match in match_history:
         custom_match = await get_match(match.match_id)
+        await check_match_validity(custom_match)
         try:
-            custom_match = await add_custom_match(custom_match)
-            await check_match_validity(custom_match)
-            print("New match added")
+            await add_custom_match(custom_match)
+            await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
+            print("added new match to db")
         except IntegrityError:
-            print("Custom match already in db")
-        
+            print("match already in db")
+       
 
 @bot.command(description="Populate database with custom matches")
 @discord.default_permissions(administrator=True)
