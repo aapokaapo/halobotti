@@ -138,47 +138,39 @@ async def get_match(match_id):
 
 
 async def get_match_history(player: str|int, start: int=0, count: int=25, match_type="all"):
-
     async for client in get_client():
-        if match_type != "ranked":
-            tries = 0
-            while tries < 3:
-                try:
+        tries = 0
+        while tries < 3:
+            try:
+                looking_for_ranked = False
+                if match_type == "ranked":
+                    # there is no way to look for just ranked type so we have to fetch all types and match the playlist id with ranked
+                    match_type = "all"
+                    looking_for_ranked = True
+                results = []
+
+                while len(results) < count:
                     response = await client.stats.get_match_history(player, start, count, match_type)
                     match_history = await response.parse()
+                    if len(match_history.results) == 0:
+                        return results
+                    for match in match_history.results:
+                        if looking_for_ranked:
+                            if not match.match_info.playlist.asset_id == RANKED_PLAYLIST:
+                                # match is not ranked, stop current iteration and take next
+                                continue
+                        results.append(match)
+                        if len(results) == count or len(match_history.results) < count:
+                            return results
 
-                    return match_history.results
+                    start += 25
 
-                except ClientResponseError as e:
-                    if tries == 3:
-                        raise e
-                    else:
-                        tries += 1
+            except ClientResponseError as e:
+                if tries == 3:
+                    raise e
+                else:
+                    tries += 1
 
-        else:
-            results = []
-            match_type = "all"
-            tries = 0
-            while tries < 3:
-                try:
-                    while len(results) < count:
-                        response = await client.stats.get_match_history(player, start, count, match_type)
-                        match_history = await response.parse()
-                        for match in match_history.results:
-                            if match.match_info.playlist.asset_id == RANKED_PLAYLIST:
-                                results.append(match)
-                                if len(results) == count:
-                                    return results
-
-                        start += 25
-
-                    return results
-
-                except ClientResponseError as e:
-                    if tries == 3:
-                        raise e
-                    else:
-                        tries += 1
 
 
 async def get_profile(gamertag: str|int):
