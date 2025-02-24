@@ -170,29 +170,31 @@ class ValidatePlayerView(discord.ui.View):
 
 
 async def find_all_custom_matches(player):
-    start = 100
+    start = 0
+    index =0
     while True:
         print(start)
         match_history = await get_match_history(player.gamertag,start=start, match_type='custom')
         if len(match_history) == 0:
             return
         for match in match_history:
+            index += 1
             custom_match = await get_match(match.match_id)
             await check_match_validity(custom_match)
             custom_players = await add_players_in_match(custom_match)
-            for player in custom_players:
-                if not player.is_valid and not player.validation_message:
-                    await update_player(player.gamertag, player.is_valid, validation_message=True)
+            for custom_player in custom_players:
+                if not custom_player.is_valid and not custom_player.validation_message and (len(custom_player.custom_matches) > 3 or sum([custom_player.is_valid for custom_player in custom_players]) > len(custom_players)/2):
+                    await update_player(custom_player.gamertag, custom_player.is_valid, validation_message=True)
                     guild = await get_log_channel()
                     channel = await bot.fetch_channel(guild.log_channel_id)
-                    message = await channel.send(content=f"Hyväksytäänkö pelaaja {player.gamertag}", view=ValidatePlayerView(player, timeout=None))
+                    message = await channel.send(content=f"Hyväksytäänkö pelaaja {custom_player.gamertag}", view=ValidatePlayerView(custom_player, timeout=None))
 
             try:
                 await add_custom_match(custom_match)
                 await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
-                print("added new match to db")
+                yield player, index
             except IntegrityError:
-                print("match already in db")
+                pass
         start += 25
        
 
@@ -200,11 +202,17 @@ async def find_all_custom_matches(player):
 @discord.default_permissions(administrator=True)
 async def populate_database(ctx):
     message = await ctx.respond("Yritetään kansoittaa tietokanta")
+    channel_id = ctx.interaction.channel_id
+    message = await message.original_response()
+    message_id = message.id
     custom_players = await get_players()
     await message.edit(content=f"Löydettiin {len(custom_players)} vahvistettua pelaajaa. Aloitetaan pelien haku")
     if custom_players:
         for player in custom_players:
-            await find_all_custom_matches(player)
+            async for player, index in find_all_custom_matches(player):
+                channel = await bot.fetch_channel(channel_id)
+                original_message = await channel.fetch_message(message_id)
+                await original_message.edit(content=f"Haetaan pelaajan {player.gamertag} peliä #{index}")
 
     matches = await get_all_matches()
     await ctx.send(f"Valmis!\nTietokannassa on {len(matches)} custom-matsia")
