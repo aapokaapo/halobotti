@@ -8,6 +8,8 @@ from database_app.database import (
 )
 import time
 
+import discord_app.embeds
+
 from sqlalchemy.exc import IntegrityError
 
 from typing import Optional
@@ -38,6 +40,10 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.respond(f"Pong! Latency is {bot.latency}")
     start = time.time()
     match_history = await get_match_history("AapoKaapo",999,25,"custom")
+    match_id = match_history[0].match_id
+    match = await get_match(match_id)
+    match_embed = await embeds.create_match_info(match)
+    await ctx.channel.send(embed=match_embed)
     print(match_history)
     end = time.time()
     

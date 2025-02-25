@@ -37,8 +37,8 @@ async def get_client():
 class Match(BaseModel):
     match_stats: MatchStats
     players: List[User]
-    map: Optional[Asset]
-    gamemode: Optional[Asset]
+    match_map: Optional[Asset]
+    match_gamemode: Optional[Asset]
 
 
 async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User]:
@@ -129,8 +129,8 @@ async def get_match(match_id):
 
         match = Match(
             match_stats=match_stats,
-            map=map_asset,
-            gamemode=gamemode_asset,
+            match_map=map_asset,
+            match_gamemode=gamemode_asset,
             players=players
         )
 
