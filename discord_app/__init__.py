@@ -42,8 +42,8 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
     match_history = await get_match_history("AapoKaapo",5,25,"custom")
     match_id = match_history[0].match_id
     match = await get_match(match_id)
-    match_embed = await embeds.create_match_info(match)
-    await ctx.channel.send(embed=match_embed)
+    match_embed, files = await embeds.create_match_info(match)
+    await ctx.channel.send(embed=match_embed, files=files)
     end = time.time()
     
     print("Took %f ms" % ((end - start) * 1000.0))
