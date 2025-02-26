@@ -1,8 +1,10 @@
+from email.policy import default
+
 from discord import Embed, File
-import plotly.express as px
-import plotly.graph_objects as go
 from spnkr.tools import OUTCOME_MAP, TEAM_MAP, MEDAL_NAME_MAP, unwrap_xuid, LIFECYCLE_MAP
 from aiohttp import ClientSession
+from typing import List
+from spnkr_app import Match
 
 async def get_map_image(map_asset):
     async with ClientSession() as session:
@@ -17,14 +19,12 @@ async def get_map_image(map_asset):
                 map_image_url = "https://img.freepik.com/premium-vector/default-image-icon-vector-missing-picture-page-website-design-mobile-app-no-photo-available_87543-11093.jpg"
 
     return map_image_url
-    
 
-import pandas as pd
 import io
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
-async def create_discord_table_image(data, columns):
+
+async def create_discord_table_image(data: List[str|int|float], columns: List[str]):
     """Generates a Discord-styled table image with a dark theme and modern styling."""
 
     # Colors matching Discord's dark theme
@@ -48,20 +48,12 @@ async def create_discord_table_image(data, columns):
     table.set_fontsize(12)  # Slightly larger font
     table.auto_set_column_width([i for i in range(len(columns))])
 
-    # Manually set specific column widths
-    col_widths = {col: 0.12 for col in ["Kills", "Deaths", "Assists"]}  # Set these columns to 12% width
-    default_width = 0.08  # Default width for other columns
 
     for i, key in table._cells.items():
         cell = table._cells[i]
         cell.set_edgecolor(border_color)  # Subtle thin border
         cell.set_linewidth(0.7)  # Thin border
         cell.set_height(0.15)  # Increase row height
-
-        # Adjust column width for "Kills", "Deaths", "Assists"
-        if i[1] < len(columns):
-            col_name = columns[i[1]]
-            cell.set_width(col_widths.get(col_name, default_width))
 
         # Header styling
         if i[0] == 0:  
@@ -71,14 +63,6 @@ async def create_discord_table_image(data, columns):
             cell.set_facecolor(bg_color if i[0] % 2 == 0 else alt_row_color)
             cell.set_text_props(color=text_color)
 
-    # Draw rounded background
-    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-    rounded_rect = patches.FancyBboxPatch(
-        (bbox.x0, bbox.y0), bbox.width, bbox.height,
-        boxstyle="round,pad=0.1", edgecolor=border_color, linewidth=1.5,
-        facecolor=bg_color
-    )
-    ax.add_patch(rounded_rect)
 
     # Save to BytesIO
     img_buf = io.BytesIO()
@@ -88,20 +72,44 @@ async def create_discord_table_image(data, columns):
     return img_buf  # Return BytesIO object for Discord upload
     
     
-async def create_match_table(match):
+async def create_match_table(match: Match):
     header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'Assists', 'Damage Dealt', 'Damage Taken','Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
-    cells = dict(values=[])
+    values=[]
     for match_player in match.match_stats.players:
         for team in match_player.player_team_stats:
             gamertag = next(player.gamertag for player in match.players if player.xuid == unwrap_xuid(match_player.player_id))
             core_stats = team.stats.core_stats
             player_stats = [gamertag, f"{TEAM_MAP[team.team_id]}", core_stats.personal_score, core_stats.kills, core_stats.deaths, core_stats.assists, core_stats.damage_dealt, core_stats.damage_taken, core_stats.shots_hit, core_stats.shots_fired, core_stats.accuracy, f"{OUTCOME_MAP[match_player.outcome]}"]
-            cells['values'].append(player_stats)
+            values.append(player_stats)
+
+    values.sort(key=lambda value: value[1])
             
-    img_buf = await create_discord_table_image(cells['values'], header)
+    img_buf = await create_discord_table_image(values, header)
         
     return img_buf
 
+
+async def create_series_table(matches: List[Match]):
+    data_from_matches = []
+    for match in matches:
+        header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'Assists', 'Damage Dealt', 'Damage Taken',
+                  'Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
+        values = []
+        for match_player in match.match_stats.players:
+            for team in match_player.player_team_stats:
+                gamertag = next(player.gamertag for player in match.players if player.xuid == unwrap_xuid(match_player.player_id))
+                core_stats = team.stats.core_stats
+                player_stats = [gamertag, f"{TEAM_MAP[team.team_id]}", core_stats.personal_score, core_stats.kills,
+                                core_stats.deaths, core_stats.assists, core_stats.damage_dealt, core_stats.damage_taken,
+                                core_stats.shots_hit, core_stats.shots_fired, core_stats.accuracy,
+                                f"{OUTCOME_MAP[match_player.outcome]}"]
+                values.append(player_stats)
+
+        values.sort(key=lambda value: value[1])
+
+        img_buf = await create_discord_table_image(values, header)
+
+        return img_buf
 
 async def create_match_info(match):
     title = f"{LIFECYCLE_MAP[match.match_stats.match_info.lifecycle_mode]}: {match.match_gamemode.public_name} - {match.match_map.public_name}"

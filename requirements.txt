@@ -2,4 +2,4 @@ py-cord==2.6.1
 spnkr==0.9.5
 sqlmodel==0.0.22
 aiosqlite==0.21.0
-plotly[express]==6.0.0
+matplotlib==3.10.0
