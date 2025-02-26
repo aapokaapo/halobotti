@@ -19,47 +19,68 @@ async def get_map_image(map_asset):
     return map_image_url
     
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import io
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 async def create_discord_table_image(data, columns):
-    """Generates a Discord-styled table image with a dark theme."""
+    """Generates a Discord-styled table image with a dark theme and modern styling."""
 
-    
     # Colors matching Discord's dark theme
-    bg_color = "#2C2F33"  # Dark gray (background)
+    bg_color = "#2C2F33"  # Dark gray background
     text_color = "#FFFFFF"  # White text
     header_color = "#7289DA"  # Blurple for header
     alt_row_color = "#23272A"  # Slightly darker than bg
-    
-    # Create figure with dark background
+    border_color = "#99AAB5"  # Soft gray border
+
+    # Create figure
     fig, ax = plt.subplots(figsize=(10, 5), dpi=100, facecolor=bg_color)
     ax.set_facecolor(bg_color)
     ax.axis('tight')
     ax.axis('off')
-    
 
     # Create table
     table = ax.table(cellText=data, colLabels=columns, cellLoc='center', loc='center')
 
     # Style table
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(12)  # Slightly larger font
     table.auto_set_column_width([i for i in range(len(columns))])
 
-    # Apply colors
+    # Manually set specific column widths
+    col_widths = {col: 0.12 for col in ["Kills", "Deaths", "Assists"]}  # Set these columns to 12% width
+    default_width = 0.08  # Default width for other columns
+
     for i, key in table._cells.items():
         cell = table._cells[i]
-        cell.set_edgecolor("black")  # Keep grid visible
-        if i[0] == 0:  # Header row
+        cell.set_edgecolor(border_color)  # Subtle thin border
+        cell.set_linewidth(0.7)  # Thin border
+        cell.set_height(0.15)  # Increase row height
+
+        # Adjust column width for "Kills", "Deaths", "Assists"
+        if i[1] < len(columns):
+            col_name = columns[i[1]]
+            cell.set_width(col_widths.get(col_name, default_width))
+
+        # Header styling
+        if i[0] == 0:  
             cell.set_facecolor(header_color)
             cell.set_text_props(color=text_color, weight='bold')
-        else:  # Data rows
+        else:  # Data row styling
             cell.set_facecolor(bg_color if i[0] % 2 == 0 else alt_row_color)
             cell.set_text_props(color=text_color)
 
-    # Save the figure to BytesIO
+    # Draw rounded background
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    rounded_rect = patches.FancyBboxPatch(
+        (bbox.x0, bbox.y0), bbox.width, bbox.height,
+        boxstyle="round,pad=0.1", edgecolor=border_color, linewidth=1.5,
+        facecolor=bg_color
+    )
+    ax.add_patch(rounded_rect)
+
+    # Save to BytesIO
     img_buf = io.BytesIO()
     plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True, facecolor=bg_color)
     img_buf.seek(0)
