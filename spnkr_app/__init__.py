@@ -8,6 +8,7 @@ from spnkr.models.discovery_ugc import Asset, Map, UgcGameVariant
 from spnkr.models.profile import User
 from typing import List, Dict, Literal, Optional
 from pydantic import BaseModel
+import time
 
 
 RANKED_PLAYLIST = "edfef3ac-9cbe-4fa2-b949-8f29deafd483"
@@ -61,8 +62,16 @@ async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
     tries = 0
     while tries < 3:
         try:
+            start = time.time()
             resp = await client.stats.get_match_stats(match_id)
+            end = time.time()
+            print("Response Took %f ms" % ((end - start) * 1000.0))
+
+      
+            start = time.time()
             match_stats = await resp.parse()
+            end = time.time()
+            print("Pydantic Took %f ms" % ((end - start) * 1000.0))
 
             return match_stats
 

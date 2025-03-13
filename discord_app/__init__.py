@@ -7,12 +7,11 @@ from database_app.database import (
     get_all_matches, add_match_to_players, add_players_in_match, get_log_channel
 )
 import time
-
 import discord_app.embeds
-
 from sqlalchemy.exc import IntegrityError
-
 from typing import Optional
+from spnkr_app.match_validity import check_match_validity
+import datetime
 
 bot = discord.Bot()
 
@@ -39,11 +38,17 @@ async def startup():
 async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.respond(f"Pong! Latency is {bot.latency}")
     start = time.time()
-    match_history = await get_match_history("AapoKaapo",5,25,"custom")
+    match_history = await get_match_history("AapoKaapo",0,25,"custom")
     match_id = match_history[0].match_id
     match = await get_match(match_id)
     match_embed, files = await embeds.create_match_info(match)
     await ctx.channel.send(embed=match_embed, files=files)
+    
+    matches = [await get_match(match.match_id) for match in match_history[1:5]]
+    
+    series_embed, files = await embeds.create_series_info(matches)
+    await ctx.channel.send(embed=series_embed, files=files)
+    
     end = time.time()
     
     print("Took %f ms" % ((end - start) * 1000.0))
@@ -142,14 +147,6 @@ async def set_log_channel(ctx, channel_id: Optional[int]=None):
     await message.edit(content=f"Kanava {channel.log_channel_id} asetettu loki-kanavaksi")
 
 
-async def check_match_validity(custom_match):
-    # if there are exactly 8 players in the game, who are is_valid -> valid
-    # if the gamemode is one of the ranked modes -> valid
-    # if the match finished either by_time or by_score-> valid
-    #
-    pass
-
-
 class ValidatePlayerView(discord.ui.View):
     def __init__(self, custom_player, timeout):
         self.custom_player = custom_player
@@ -183,7 +180,7 @@ async def validate_players(custom_players):
                                          view=ValidatePlayerView(custom_player, timeout=None))
 
 
-async def find_all_custom_matches(player):
+async def find_all_custom_matches(player, date):
     start = 0
     index =0
     while True:
@@ -194,14 +191,15 @@ async def find_all_custom_matches(player):
         for match in match_history:
             index += 1
             custom_match = await get_match(match.match_id)
-            await check_match_validity(custom_match)
+            yield player, index
+            if not await check_match_validity(custom_match, date):
+                continue
             custom_players = await add_players_in_match(custom_match)
             await validate_players(custom_players)
 
             try:
                 await add_custom_match(custom_match)
                 await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
-                yield player, index
             except IntegrityError:
                 pass
         start += 25
@@ -209,7 +207,8 @@ async def find_all_custom_matches(player):
 
 @bot.command(description="Populate database with custom matches")
 @discord.default_permissions(administrator=True)
-async def populate_database(ctx):
+async def populate_database(ctx, year="2024", month="1", day="1"):
+    date = datetime.datetime(year, month, day, tzinfo=datetime.UTC)
     message = await ctx.respond("Yritetään kansoittaa tietokanta")
     channel_id = ctx.interaction.channel_id
     message = await message.original_response()
@@ -223,7 +222,7 @@ async def populate_database(ctx):
         custom_player = players[player_index]
         player_index += 1
 
-        async for current_player, index in find_all_custom_matches(custom_player):
+        async for current_player, index in find_all_custom_matches(custom_player, date):
             channel = await bot.fetch_channel(channel_id)
             original_message = await channel.fetch_message(message_id)
             await original_message.edit(content=f"Haetaan pelaajan {current_player.gamertag} peliä #{index}")
