@@ -1,5 +1,12 @@
-import discord
+from asyncio import timeout
+from re import match
 
+import discord
+from discord import Interaction
+from discord.ext.pages import Page, Paginator
+from spnkr.tools import LIFECYCLE_MAP
+
+from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
 from spnkr_app import get_match, get_match_history, get_profile
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
@@ -9,7 +16,7 @@ from database_app.database import (
 import time
 import discord_app.embeds
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
+from typing import Optional, Literal
 from spnkr_app.match_validity import check_match_validity
 import datetime
 
@@ -229,5 +236,57 @@ async def populate_database(ctx, year="2024", month="1", day="1"):
 
     matches = await get_all_matches()
     await ctx.send(f"Valmis!\nTietokannassa on {len(matches)} custom-matsia")
-    
+
+
+class MatchSelect(discord.ui.Select):
+    def __init__(self, match_history):
+        self.match_history = match_history
+        options = []
+        for custom_match in match_history:
+            option = discord.SelectOption(
+                label=f"{LIFECYCLE_MAP[custom_match.match_stats.match_info.lifecycle_mode]}: {custom_match.match_gamemode.public_name} - {custom_match.match_map.public_name}",
+                value=f"{custom_match.match_stats.match_id}",
+                emoji=None
+            )
+            options.append(option)
+        super().__init__(placeholder="Select A Match",max_values=len(options), options=options)
+
+    async def callback(self, interaction: Interaction):
+        pages = []
+        files = []
+        match_ids = self.values
+        selected_matches = [match for match in self.match_history if f"{match.match_stats.match_id}" in match_ids]
+        embed, file = await create_series_info(selected_matches)
+        series_page = Page(embeds=[embed], files=file)
+        pages.append(series_page)
+        files.append(file)
+        for match in selected_matches:
+            match_embed, file = await create_match_info(match)
+            page = Page(embeds=[match_embed], files=file)
+            pages.append(page)
+            files.append(file)
+        paginator = Paginator(pages=pages)
+        await paginator.respond(interaction)
+
+
+class SeriesSelect(discord.ui.View):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    async def on_timeout(self):
+        await self.message.delete()
+
+
+@bot.command(description="Create a summary of played matches")
+async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type = "all"):
+    msg = await ctx.respond(content="Haetaan matseja")
+    match_history = await get_match_history(gamertag, start=start, count=count, match_type=match_type)
+    custom_matches = []
+    for match in match_history:
+        custom_match = await get_match(match.match_id)
+        custom_matches.append(custom_match)
+
+    select = MatchSelect(custom_matches)
+    await msg.edit_original_response(content="", view=SeriesSelect(select))
+
 
