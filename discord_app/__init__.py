@@ -19,6 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from typing import Optional, Literal
 from spnkr_app.match_validity import check_match_validity
 import datetime
+from aiohttp import ClientSession, ClientResponseError
+
 
 bot = discord.Bot()
 
@@ -252,6 +254,7 @@ class MatchSelect(discord.ui.Select):
         super().__init__(placeholder="Select A Match",max_values=len(options), options=options)
 
     async def callback(self, interaction: Interaction):
+        await interaction.response.defer()
         pages = []
         files = []
         match_ids = self.values
@@ -283,10 +286,14 @@ async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Opti
     match_history = await get_match_history(gamertag, start=start, count=count, match_type=match_type)
     custom_matches = []
     for match in match_history:
-        custom_match = await get_match(match.match_id)
-        custom_matches.append(custom_match)
+        try:
+            custom_match = await get_match(match.match_id)
+            custom_matches.append(custom_match)
+            
+            select = MatchSelect(custom_matches)
+            await msg.edit_original_response(content="", view=SeriesSelect(select))
 
-    select = MatchSelect(custom_matches)
-    await msg.edit_original_response(content="", view=SeriesSelect(select))
-
+        except ClientResponseError as e:
+            await msg.edit_original_response(f"Got an unexpected error {e.status}")
+    
 

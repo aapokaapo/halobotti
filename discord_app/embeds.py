@@ -71,6 +71,7 @@ async def create_discord_table_image(data: List[str|int|float], columns: List[st
     img_buf = io.BytesIO()
     plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True, facecolor=bg_color)
     img_buf.seek(0)
+    plt.close()
 
     return img_buf  # Return BytesIO object for Discord upload
 
@@ -141,7 +142,10 @@ async def create_match_table(match: Match):
     values=[]
     for match_player in match.match_stats.players:
         for team in match_player.player_team_stats:
-            gamertag = next(player.gamertag for player in match.players if player.xuid == unwrap_xuid(match_player.player_id))
+            if match_player.is_human:
+                gamertag = next(player.gamertag for player in match.players if player.xuid == unwrap_xuid(match_player.player_id))
+            else:
+                gamertag = BOT_MAP[match_player.player_id]
             core_stats = team.stats.core_stats
             player_stats = [gamertag, f"{TEAM_MAP[team.team_id]}", core_stats.personal_score, core_stats.kills, core_stats.deaths, core_stats.assists, core_stats.damage_dealt, core_stats.damage_taken, core_stats.shots_hit, core_stats.shots_fired, core_stats.accuracy, f"{OUTCOME_MAP[match_player.outcome]}"]
             values.append(player_stats)
@@ -166,12 +170,15 @@ async def create_match_info(match):
     
     teams = dict()
     for player in match.match_stats.players:
-        profile = [profile for profile in match.players if profile.xuid == unwrap_xuid(player.player_id)][0]
+        if player.is_human:
+            gamertag = [profile.gamertag for profile in match.players if profile.xuid == unwrap_xuid(player.player_id)][0]
+        else:
+            gamertag = BOT_MAP[player.player_id]
         try:
-            teams[player.last_team_id].append((profile.gamertag, player))
+            teams[player.last_team_id].append((gamertag, player))
         except KeyError:
             teams[player.last_team_id] = []
-            teams[player.last_team_id].append((profile.gamertag, player))
+            teams[player.last_team_id].append((gamertag, player))
     for team_id, team in teams.items():
         match_embed.add_field(name=f"{TEAM_MAP[team_id]}", value="\n".join([player[0] for player in team]))
 

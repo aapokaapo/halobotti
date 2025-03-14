@@ -44,23 +44,24 @@ class Match(BaseModel):
 
 async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User]:
     tries = 0
-    while tries < 3:
+    while tries < 4:
         try:
             resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players if player.is_human])
             profiles = await resp.parse()
-
             return profiles
 
         except ClientResponseError as e:
+            print(e)
             if tries == 3:
                 raise e
             else:
+                await asyncio.sleep(1.5)
                 tries += 1
 
 
 async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
     tries = 0
-    while tries < 3:
+    while tries < 4:
         try:
             start = time.time()
             resp = await client.stats.get_match_stats(match_id)
@@ -85,7 +86,7 @@ async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
 
 async def get_gamemode_asset(client: HaloInfiniteClient, match_stats: MatchStats) -> UgcGameVariant:
     tries = 0
-    while tries < 3:
+    while tries < 4:
         try:
             resp = await client.discovery_ugc.get_ugc_game_variant(
                 match_stats.match_info.ugc_game_variant.asset_id,
@@ -104,7 +105,7 @@ async def get_gamemode_asset(client: HaloInfiniteClient, match_stats: MatchStats
 
 async def get_map_asset(client: HaloInfiniteClient, match_stats: MatchStats) -> Map:
     tries = 0
-    while tries < 3:
+    while tries < 4:
         try:
             resp = await client.discovery_ugc.get_map(
                 match_stats.match_info.map_variant.asset_id,
@@ -134,7 +135,12 @@ async def get_match(match_id):
         except ClientResponseError:
             gamemode_asset = None
 
-        players = await get_profiles(client, match_stats)
+        try:
+            players = await get_profiles(client, match_stats)
+        except ClientResponseError as e:
+            if e.status == 503:
+                raise e
+        
 
         match = Match(
             match_stats=match_stats,
