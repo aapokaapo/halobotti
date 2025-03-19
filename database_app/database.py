@@ -40,6 +40,15 @@ async def get_player(gamertag):
         player = results.unique().first()
     
         return player
+        
+
+async def get_player_by_xuid(xuid):
+    async with Session(engine) as session:
+        statement = select(CustomPlayer).where(CustomPlayer.xuid == xuid)
+        results = await session.exec(statement)
+        player = results.unique().first()
+    
+        return player
 
 
 async def update_player(gamertag, value, validation_message=False):
@@ -76,12 +85,13 @@ async def add_players_in_match(match):
     return custom_players
 
 
-async def add_custom_match(match):
+async def add_custom_match(match, is_valid: bool = False):
 
     async with Session(engine, expire_on_commit=False) as session:
         custom_match = CustomMatch(
             match_id=match.match_stats.match_id,
-            players=[]
+            players=[],
+            is_vslid=is_valid
         )
         try:
             session.add(custom_match)

@@ -51,7 +51,6 @@ async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> L
             return profiles
 
         except ClientResponseError as e:
-            print(e)
             if tries == 3:
                 raise e
             else:
@@ -138,8 +137,7 @@ async def get_match(match_id):
         try:
             players = await get_profiles(client, match_stats)
         except ClientResponseError as e:
-            if e.status == 503:
-                raise e
+            raise e
         
 
         match = Match(

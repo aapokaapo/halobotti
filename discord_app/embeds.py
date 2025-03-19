@@ -93,7 +93,7 @@ async def create_match_description(matches: list[Match]) -> str:
     
 
 async def create_aggregated_match_table(matches: list[Match]):
-    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'Assists', 'Damage Dealt', 'Damage Taken', 'Shots Hit', 'Shots Fired', 'Accuracy']
+    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'K/D', 'Assists', 'Damage Dealt', 'Damage Taken', 'Damage Diff', 'Shots Hit', 'Shots Fired', 'Accuracy']
     player_totals = defaultdict(lambda: [0] * (len(header) - 2))  # Dict with default list for stats
 
     for match in matches:
@@ -104,31 +104,32 @@ async def create_aggregated_match_table(matches: list[Match]):
                 else:
                     gamertag = BOT_MAP[match_player.player_id]
                 core_stats = team.stats.core_stats
-                try:
-                    team_name = TEAM_MAP[team.team_id]
-                except KeyError:
-                    team_name = "Invalid Team"
-
+                team_name = f"{TEAM_MAP[team.team_id]}" if match.match_stats.match_info.teams_enabled else "FFA"
+                
                 # Aggregate stats per player
                 if gamertag not in player_totals:
-                    player_totals[gamertag] = [team_name, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Init with team name
+                    player_totals[gamertag] = [team_name, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Init with team name
 
                 stats = player_totals[gamertag]
                 stats[1] += core_stats.personal_score
                 stats[2] += core_stats.kills
                 stats[3] += core_stats.deaths
-                stats[4] += core_stats.assists
-                stats[5] += core_stats.damage_dealt
-                stats[6] += core_stats.damage_taken
-                stats[7] += core_stats.shots_hit
-                stats[8] += core_stats.shots_fired
+                stats[5] += core_stats.assists
+                stats[6] += core_stats.damage_dealt
+                stats[7] += core_stats.damage_taken
+                stats[9] += core_stats.shots_hit
+                stats[10] += core_stats.shots_fired
 
     # Calculate accuracy after summing up
     values = []
     for gamertag, stats in player_totals.items():
-        shots_hit, shots_fired = stats[7], stats[8]
+        kills, deaths = stats[2], stats[3]
+        kd = kills / deaths if deaths > 0 else kills
+        shots_hit, shots_fired = stats[9], stats[10]
         accuracy = (shots_hit / shots_fired) * 100 if shots_fired > 0 else 0
-        values.append([gamertag] + stats[:9] + [f"{accuracy:.2f}"])
+        dmg_dealt, dmg_taken = stats[6], stats[7]
+        total_damage = dmg_dealt - dmg_taken
+        values.append([gamertag] + stats[:4] + [f"{kd:.2f}"] + stats[5:8] + [total_damage] + stats[9:11] + [f"{accuracy:.2f}"])
 
     values.sort(key=lambda value: value[1])  # Sort by team
 
@@ -138,7 +139,7 @@ async def create_aggregated_match_table(matches: list[Match]):
     
     
 async def create_match_table(match: Match):
-    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'Assists', 'Damage Dealt', 'Damage Taken','Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
+    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'K/D', 'Assists', 'Damage Dealt', 'Damage Taken', 'Damage Diff','Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
     values=[]
     for match_player in match.match_stats.players:
         for team in match_player.player_team_stats:
@@ -147,7 +148,23 @@ async def create_match_table(match: Match):
             else:
                 gamertag = BOT_MAP[match_player.player_id]
             core_stats = team.stats.core_stats
-            player_stats = [gamertag, f"{TEAM_MAP[team.team_id]}", core_stats.personal_score, core_stats.kills, core_stats.deaths, core_stats.assists, core_stats.damage_dealt, core_stats.damage_taken, core_stats.shots_hit, core_stats.shots_fired, core_stats.accuracy, f"{OUTCOME_MAP[match_player.outcome]}"]
+            team_name = f"{TEAM_MAP[team.team_id]}" if match.match_stats.match_info.teams_enabled else "FFA"
+            player_stats = [
+                gamertag, 
+                f"{team_name}", 
+                core_stats.personal_score, 
+                core_stats.kills, 
+                core_stats.deaths, 
+                f"{core_stats.kills / core_stats.deaths if core_stats.deaths > 0 else core_stats.kills:.02f}",
+                core_stats.assists, 
+                core_stats.damage_dealt, 
+                core_stats.damage_taken, 
+                core_stats.damage_dealt - core_stats.damage_taken,
+                core_stats.shots_hit, 
+                core_stats.shots_fired, 
+                core_stats.accuracy, 
+                f"{OUTCOME_MAP[match_player.outcome]}"
+                ]
             values.append(player_stats)
 
     values.sort(key=lambda value: value[1])
@@ -179,8 +196,12 @@ async def create_match_info(match):
         except KeyError:
             teams[player.last_team_id] = []
             teams[player.last_team_id].append((gamertag, player))
-    for team_id, team in teams.items():
-        match_embed.add_field(name=f"{TEAM_MAP[team_id]}", value="\n".join([player[0] for player in team]))
+    if match.match_stats.match_info.teams_enabled:
+        for team_id, team in teams.items():
+            match_embed.add_field(name=f"{TEAM_MAP[team_id]}", value="\n".join([player[0] for player in team]))
+    else:
+        match_embed.add_field(name="Players", value="\n".join([player.gamertag for player in match.players ]))
+    
 
     match_embed.set_thumbnail(url=await get_map_image(match.match_map))
     match_embed.set_author(name="HaloBotti 2.0")
@@ -193,6 +214,43 @@ async def create_match_info(match):
     ]
     
     return match_embed, files
+    
+
+async def determine_team_outcomes(match_history: List[Match]):
+    match_data = []
+    for match in match_history:
+        team_info = defaultdict(lambda: {"players": [], "outcomes": []})
+        for player in match.match_stats.players:
+            if player.is_human:
+                gamertag = [profile.gamertag for profile in match.players if profile.xuid == unwrap_xuid(player.player_id)][0]
+            else:
+                gamertag = BOT_MAP[player.player_id]
+            for player_team_stats in player.player_team_stats:
+                team_info[player_team_stats.team_id]["players"].append(gamertag)
+                team_info[player_team_stats.team_id]["outcomes"].append(OUTCOME_MAP[player.outcome])
+        for team_id, team in team_info.items():
+            final_outcome = "UNDETERMINED"
+            unique_outcomes = set(team["outcomes"])  # Get unique outcome types
+            for outcome in unique_outcomes:
+                count = sum(1 for o in team["outcomes"] if o == outcome)  # Manually count occurrences
+                if count / len(team["players"]) >= 0.5:
+                    final_outcome = outcome
+
+            # Extract player gamertags as a set for comparison
+            team_players_set = {existing_player for existing_player in team["players"]}
+
+            # Check if a team with the same players already exists
+            existing_team = next((t for t in match_data if set(t["players"]) == team_players_set), None
+            )
+            if existing_team:
+                existing_team["outcomes"].append(outcome)
+            else:
+                match_data.append({
+                    "players": team["players"],
+                    "outcomes": [outcome]
+                })
+                
+    return match_data
 
 
 async def create_series_info(match_history: List[Match]):
@@ -201,6 +259,19 @@ async def create_series_info(match_history: List[Match]):
     description = await create_match_description(match_history)
     
     series_embed = Embed(title=title, description=description)
+    
+    teams_and_outcomes = await determine_team_outcomes(match_history)
+    
+    index = 0
+    for team in teams_and_outcomes:
+        index += 1
+        players = "\n".join(team["players"])
+        outcomes = "-".join(team["outcomes"])
+        win_sum = team["outcomes"].count("WIN")
+        tie_sum = team["outcomes"].count("TIE")
+        loss_sum = team["outcomes"].count("LOSS")
+        series_embed.add_field(name=f"Team #{index}- W:{win_sum}/T:{tie_sum}/L:{loss_sum}", value=f"{players}\n**Maps**:\n{outcomes}")
+    
     image = await create_aggregated_match_table(match_history)
     random_uuid = uuid.uuid4()
     series_embed.set_image(url=f"attachment://{random_uuid}.png")

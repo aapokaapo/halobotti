@@ -3,7 +3,8 @@ from re import match
 
 import discord
 from discord import Interaction
-from discord.ext.pages import Page, Paginator
+from discord.ext.pages import Page, Paginator, PaginatorButton
+from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
 from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
@@ -20,6 +21,7 @@ from typing import Optional, Literal
 from spnkr_app.match_validity import check_match_validity
 import datetime
 from aiohttp import ClientSession, ClientResponseError
+from discord.errors import HTTPException
 
 
 bot = discord.Bot()
@@ -69,12 +71,15 @@ async def add_player(ctx, gamertag:str, is_valid: Optional[bool]):
     
     message = await ctx.respond(f"Yritetään lisätä pelaaja {gamertag} tietokantaan...")
     profile = await get_profile(gamertag)
-    try:
-        player = await add_custom_player(profile, is_valid)
-        await message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan")
-        
-    except IntegrityError:
-        await message.edit(content=f"Pelaaja {gamertag} on jo tietokannassa")
+    if profile:
+        try:
+            player = await add_custom_player(profile, is_valid)
+            await message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan")
+            
+        except IntegrityError:
+            await message.edit(content=f"Pelaaja {gamertag} on jo tietokannassa")
+    else:
+        await message.edit(content="something went wrong")
 
 
 
@@ -201,13 +206,12 @@ async def find_all_custom_matches(player, date):
             index += 1
             custom_match = await get_match(match.match_id)
             yield player, index
-            if not await check_match_validity(custom_match, date):
-                continue
+            is_valid = await check_match_validity(custom_match, date)
             custom_players = await add_players_in_match(custom_match)
             await validate_players(custom_players)
 
             try:
-                await add_custom_match(custom_match)
+                await add_custom_match(custom_match, is_valid)
                 await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
             except IntegrityError:
                 pass
@@ -238,6 +242,32 @@ async def populate_database(ctx, year="2024", month="1", day="1"):
 
     matches = await get_all_matches()
     await ctx.send(f"Valmis!\nTietokannassa on {len(matches)} custom-matsia")
+    
+
+class PublishView(discord.ui.View):
+    def __init__(self):
+        self.paginator = None
+        super().__init__()
+        
+    def add_paginator(self, paginator):
+        self.paginator = paginator
+        
+
+    @discord.ui.button(label="Publish")
+    async def callback(self, button, interaction):
+        if self.paginator:
+            self.paginator.custom_view = None
+            await self.paginator.respond(interaction)
+
+
+class SeriesPaginator(Paginator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+    async def on_timeout(self):
+        await self.goto_page(0)
+        await super().on_timeout()
+        
 
 
 class MatchSelect(discord.ui.Select):
@@ -251,7 +281,7 @@ class MatchSelect(discord.ui.Select):
                 emoji=None
             )
             options.append(option)
-        super().__init__(placeholder="Select A Match",max_values=len(options), options=options)
+        super().__init__(placeholder="Select A Match", max_values=len(options), options=options)
 
     async def callback(self, interaction: Interaction):
         await interaction.response.defer()
@@ -268,32 +298,80 @@ class MatchSelect(discord.ui.Select):
             page = Page(embeds=[match_embed], files=file)
             pages.append(page)
             files.append(file)
-        paginator = Paginator(pages=pages)
-        await paginator.respond(interaction)
+        custom_view = PublishView()
+        paginator = SeriesPaginator(pages=pages)
+        custom_view.add_paginator(paginator)
+        paginator.custom_view = custom_view
+        await paginator.respond(interaction, ephemeral=True)
 
 
-class SeriesSelect(discord.ui.View):
+class SeriesView(discord.ui.View):
     def __init__(self, *args):
         super().__init__(*args)
 
     async def on_timeout(self):
-        await self.message.delete()
+        try:
+            await self.parent.edit_original_response(delete_after=0)
+        except AttributeError:
+            await self.message.edit(delete_after=0)
 
 
 @bot.command(description="Create a summary of played matches")
 async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type = "all"):
-    msg = await ctx.respond(content="Haetaan matseja")
+    msg = await ctx.respond(content="Haetaan matseja", ephemeral=True)
     match_history = await get_match_history(gamertag, start=start, count=count, match_type=match_type)
     custom_matches = []
-    for match in match_history:
-        try:
+    try:
+        index = 0
+        for match in match_history:
+            index += 1
             custom_match = await get_match(match.match_id)
             custom_matches.append(custom_match)
+            await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
             
-            select = MatchSelect(custom_matches)
-            await msg.edit_original_response(content="", view=SeriesSelect(select))
+        select = MatchSelect(custom_matches)
+        await msg.edit_original_response(content="", view=SeriesView(select))
 
-        except ClientResponseError as e:
-            await msg.edit_original_response(f"Got an unexpected error {e.status}")
+    except ClientResponseError as e:
+        await msg.edit_original_response(content=f"Got an unexpected error {e}")
     
 
+@tasks.loop(minutes=3)
+async def fetch_new_matches():
+    guild = await get_log_channel()
+    channel = await bot.fetch_channel(guild.log_channel_id)
+    custom_players = await get_players()
+    for player in custom_players:
+        match_history = await get_match_history(player.gamertag, count=25)
+        for match in match_history:
+            custom_match = await get_match(match.match_id)
+            is_valid = await check_match_validity(custom_match)
+            custom_players = await add_players_in_match(custom_match)
+            await validate_players(custom_players)
+
+            try:
+                await add_custom_match(custom_match, is_valid)
+                await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
+                embed, files = await create_match_info(custom_match)
+                await channel.send(embed=embed, files=files)
+            except IntegrityError:
+                pass
+        
+        
+@bot.command()
+async def start_tracking(ctx):
+    try:
+        fetch_new_matches.start()
+        await ctx.respond(content="Started match tracking", ephemeral=True)
+    except HTTPException:
+        await ctx.respond(content="Something went wrong", ephemeral=True)
+    
+    
+@bot.command()
+async def stop_tracking(ctx):
+    try:
+        fetch_new_matches.stop()
+        await ctx.respond(content="Stopped match tracking", ephemeral=True)
+    except HTTPException:
+        await ctx.respond(content="Something went wrong", ephemeral=True)
+    
