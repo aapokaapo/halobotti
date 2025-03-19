@@ -21,7 +21,7 @@ class CustomMatch(SQLModel, table=True):
 class CustomPlayer(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     gamertag: str
-    xuid: str = Field(unique=True)
+    xuid: int = Field(unique=True)
     custom_matches: List[CustomMatch] = Relationship(back_populates="players", link_model=LinkTable, sa_relationship_kwargs={"lazy": "joined"},)
     is_valid: bool = False
     validation_message: bool = False

@@ -1,14 +1,20 @@
 import asyncio
 
+from spnkr.tools import BOT_MAP
+from spnkr.xuid import unwrap_xuid
+from sqlalchemy.exc import IntegrityError
+
 from app.tokens import AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI, AZURE_REFRESH_TOKEN
 from aiohttp import ClientSession, ClientResponseError
 from spnkr import HaloInfiniteClient, AzureApp, refresh_player_tokens, authenticate_player
 from spnkr.models.stats import MatchStats
 from spnkr.models.discovery_ugc import Asset, Map, UgcGameVariant
-from spnkr.models.profile import User
+from spnkr.models.profile import User, GamerPicture
 from typing import List, Dict, Literal, Optional
 from pydantic import BaseModel
 import time
+
+from database_app.database import get_player_by_xuid, add_custom_player
 
 
 RANKED_PLAYLIST = "edfef3ac-9cbe-4fa2-b949-8f29deafd483"
@@ -34,28 +40,82 @@ async def get_client():
 
         yield client
 
+class TempPlayer(BaseModel):
+    gamertag: str
+    xuid: int
+    gamerpic: Optional[GamerPicture] = None
+
 
 class Match(BaseModel):
     match_stats: MatchStats
-    players: List[User]
+    players: List[User|TempPlayer]
     match_map: Optional[Asset]
     match_gamemode: Optional[Asset]
 
 
-async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User]:
+async def get_profiles_from_db(match_stats: MatchStats) -> List[User|TempPlayer]:
+    db_profiles = []
+    not_in_db =[]
+    for player in match_stats.players:
+        if player.is_human:
+            xuid = unwrap_xuid(player.player_id)
+            db_player = await get_player_by_xuid(xuid)
+            if db_player:
+                db_profiles.append(TempPlayer(gamertag=db_player.gamertag, xuid=xuid))
+            else:
+                not_in_db.append(xuid)
+        else:
+            gamertag = BOT_MAP[player.player_id]
+            xuid = int(float(player.player_id[4:-1]))
+            db_profiles.append(TempPlayer(gamertag=gamertag, xuid=xuid))
+
+
+    return db_profiles
+
+
+async def get_profiles_from_xbox(xuids: List[str], client: HaloInfiniteClient|None = None) -> List[User]:
     tries = 0
     while tries < 4:
         try:
-            resp = await client.profile.get_users_by_id([player.player_id for player in match_stats.players if player.is_human])
-            profiles = await resp.parse()
-            return profiles
+            resp = await client.profile.get_users_by_id(xuids)
+            xbox_profiles = await resp.parse()
+            return xbox_profiles
 
         except ClientResponseError as e:
+            if e.status == 429:
+                print("Rate limited, sleeping for 5 minutes")
+                await asyncio.sleep(300)
+                tries = 0
+
             if tries == 3:
                 raise e
             else:
                 await asyncio.sleep(1.5)
                 tries += 1
+
+
+async def get_profiles(client: HaloInfiniteClient, match_stats: MatchStats) -> List[User|TempPlayer]:
+    db_profiles = await get_profiles_from_db(match_stats)
+    xuids = [player.player_id for player in match_stats.players if player.is_human and (unwrap_xuid(player.player_id) not in [db_player.xuid for db_player in db_profiles])]
+    try:
+        xbox_profiles = await get_profiles_from_xbox(xuids, client)
+
+        for profile in xbox_profiles:
+            try:
+                await add_custom_player(profile, False)
+            except IntegrityError:
+                pass
+
+        print(f"DB Profiles: {len(db_profiles)}")
+        print(f"XB Profiles: {len(xbox_profiles)}")
+
+
+        return db_profiles + xbox_profiles
+
+    except ClientResponseError as e:
+        raise e
+
+
 
 
 async def get_match_stats(client: HaloInfiniteClient, match_id) -> MatchStats:
@@ -189,7 +249,7 @@ async def get_match_history(player: str|int, start: int=0, count: int=25, match_
 async def get_profile(gamertag: str|int):
     async for client in get_client():
         tries = 0
-        while tries < 3:
+        while tries < 4:
             try:
                 resp = await client.profile.get_user_by_gamertag(gamertag)
                 profile = await resp.parse()
@@ -197,6 +257,11 @@ async def get_profile(gamertag: str|int):
                 return profile
 
             except ClientResponseError as e:
+                if e.status == 429:
+                    print("Rate limited, sleeping for 5 minutes")
+                    await asyncio.sleep(180)
+                    tries = 0
+
                 if tries == 3:
                     raise e
                 else:

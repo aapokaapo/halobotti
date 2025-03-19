@@ -76,12 +76,13 @@ async def get_players():
 async def add_players_in_match(match):
     custom_players = []
     for player in match.players:
-        try:
-            await add_custom_player(player)
-        except IntegrityError:
-            pass
-        custom_player = await get_player(player.gamertag)
-        custom_players.append(custom_player)
+        if player.xuid > 100:
+            try:
+                await add_custom_player(player)
+            except IntegrityError:
+                pass
+            custom_player = await get_player(player.gamertag)
+            custom_players.append(custom_player)
     return custom_players
 
 
@@ -138,9 +139,10 @@ async def add_match_to_players(custom_match_id, players):
         match = await get_match(custom_match_id)
         for player in players:
             custom_player = await get_player(player.gamertag)
-            custom_player.custom_matches.append(match)
-            session.add(custom_player)
-            await session.commit()
+            if custom_player:
+                custom_player.custom_matches.append(match)
+                session.add(custom_player)
+                await session.commit()
 
 
 async def add_channel(guild_id):

@@ -8,7 +8,7 @@ from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
 from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
-from spnkr_app import get_match, get_match_history, get_profile
+from spnkr_app import get_match, get_match_history, get_profile, get_profiles
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
     get_players, update_player, engine_start, get_all_channels,
@@ -216,11 +216,18 @@ async def find_all_custom_matches(player, date):
             except IntegrityError:
                 pass
         start += 25
-       
+
+
+
+
 
 @bot.command(description="Populate database with custom matches")
 @discord.default_permissions(administrator=True)
-async def populate_database(ctx, year="2024", month="1", day="1"):
+async def populate_database(ctx, year:int=2024, month:int=1, day:int=1):
+    guild = await get_log_channel()
+    if not guild.log_channel_id:
+        await update_channel(guild.guild_id, ctx.interaction.channel_id)
+
     date = datetime.datetime(year, month, day, tzinfo=datetime.UTC)
     message = await ctx.respond("Yritetään kansoittaa tietokanta")
     channel_id = ctx.interaction.channel_id
