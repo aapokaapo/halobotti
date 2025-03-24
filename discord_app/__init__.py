@@ -28,6 +28,27 @@ from discord.errors import HTTPException
 bot = discord.Bot()
 
 
+class PublishView(discord.ui.View):
+    def __init__(self):
+        self.paginator = None
+        super().__init__()
+
+    def add_paginator(self, paginator):
+        self.paginator = paginator
+
+    @discord.ui.button(label="Publish")
+    async def callback(self, button, interaction):
+        if self.paginator:
+            self.paginator.custom_view = None
+            await self.paginator.respond(interaction)
+
+        elif self.message:
+            await self.message.channel.send(embeds=self.message.embeds)
+
+
+    pass
+
+
 async def add_channels_to_database():
     async for guild in bot.fetch_guilds():
         try:
@@ -55,7 +76,7 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.channel.send(embed=match_embed, files=files)
 
     series_embed, files = await embeds.create_series_info(match_data[0:5])
-    await ctx.channel.send(embed=series_embed, files=files)
+    await ctx.channel.send(embed=series_embed, files=files,)
     
     end = time.time()
     
@@ -151,13 +172,13 @@ async def player_info(ctx, gamertag:str):
     
 @bot.command(description="Get data of player's ranked performance")
 async def rank(ctx, gamertag: str):
-    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
+    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data", ephemeral=True)
     async for client in get_client():
         profile = await get_xbl_profiles(client, gamertag)
         if profile:
             custom_matches = await fetch_player_match_skills(profile[0].gamertag)
             embed, files = await create_rank_embed(profile[0], custom_matches)
-            await message.edit(embed=embed, files=files)
+            await message.edit(content="", embed=embed, files=files, view=PublishView())
     
     
 @bot.command(description="Sets the text channel as log channel")
@@ -267,22 +288,6 @@ async def populate_database(ctx, year:int=2024, month:int=1, day:int=1):
 
     matches = await get_all_matches()
     await ctx.send(f"Valmis!\nTietokannassa on {len(matches)} custom-matsia")
-    
-
-class PublishView(discord.ui.View):
-    def __init__(self):
-        self.paginator = None
-        super().__init__()
-        
-    def add_paginator(self, paginator):
-        self.paginator = paginator
-        
-
-    @discord.ui.button(label="Publish")
-    async def callback(self, button, interaction):
-        if self.paginator:
-            self.paginator.custom_view = None
-            await self.paginator.respond(interaction)
 
 
 class SeriesPaginator(Paginator):
