@@ -9,7 +9,7 @@ from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
 from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
-from spnkr_app import get_match, get_match_history, get_profile, get_profiles, get_xbl_profiles, get_match_data
+from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
     get_players, update_player, engine_start, get_all_channels,
@@ -48,33 +48,19 @@ async def startup():
 
 @bot.command(description="Sends the bot's latency.") # this decorator makes a slash command
 async def ping(ctx):  # a slash command will be created with the name "ping"
-    await ctx.respond(f"Pong! Latency is {bot.latency}")
     start = time.time()
-    match_history = await get_match_history("svstematic",0,25,"custom")
-    match_id = match_history[0].match_id
-    match = await get_match(match_id)
-    match_embed, files = await embeds.create_match_info(match)
+    await ctx.respond(f"Pong! Latency is {bot.latency}")
+    match_data = await fetch_player_match_data("AapoKaapo")
+    match_embed, files = await embeds.create_match_info(match_data[0])
     await ctx.channel.send(embed=match_embed, files=files)
-    
-    tasks = []
-    for match in match_history[0:5]:
-        task = asyncio.create_task(get_match(match.match_id))
-        tasks.append(task)
-    matches = await asyncio.gather(*tasks)
-    
-    #matches = [await get_match(match.match_id) for match in match_history[1:5]]
-    
-    series_embed, files = await embeds.create_series_info(matches)
+
+    series_embed, files = await embeds.create_series_info(match_data[0:5])
     await ctx.channel.send(embed=series_embed, files=files)
     
     end = time.time()
     
     print("Took %f ms" % ((end - start) * 1000.0))
-    
-    xuids = []
-    for match in matches:
-        xuids += match.match_stats.xuids
-   
+
 
 
 @bot.command(description="Adds a player to the database")
@@ -82,16 +68,17 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
 async def add_player(ctx, gamertag:str, is_valid: Optional[bool]):
     
     message = await ctx.respond(f"Yritetään lisätä pelaaja {gamertag} tietokantaan...")
-    profile = await get_profile(gamertag)
-    if profile:
-        try:
-            player = await add_custom_player(profile, is_valid)
-            await message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan")
-            
-        except IntegrityError:
-            await message.edit(content=f"Pelaaja {gamertag} on jo tietokannassa")
-    else:
-        await message.edit(content="something went wrong")
+    async for client in get_client():
+        profile = await get_xbl_profiles(client, gamertag)
+        if profile:
+            try:
+                player = await add_custom_player(profile[0], is_valid)
+                await message.edit(content=f"Pelaaja {player.gamertag}-{player.xuid} lisätty tietokantaan")
+
+            except IntegrityError:
+                await message.edit(content=f"Pelaaja {gamertag} on jo tietokannassa")
+        else:
+            await message.edit(content="something went wrong")
 
 
 
@@ -137,32 +124,30 @@ class AddPlayerView(discord.ui.View):
 @discord.default_permissions(administrator=True)
 async def _update_player(ctx, gamertag: str, is_valid: bool):
     message = await ctx.respond(f"Yritetään päivittää pelaajan {gamertag} tilaa")
-    profile = await get_profile(gamertag)
-    if profile:
-        player = await update_player(profile.gamertag, is_valid)
-        if player:
-            await message.edit(content=f"Päivitetty pelaajan {player.gamertag} tilaksi {player.is_valid}")
-        else:
-            await message.edit(
-                content=f"Pelaajaa {profile.gamertag} ei löytynyt tietokannasta. Haluatko lisätä pelaajan?",
-                view=AddPlayerView(profile, is_valid, timeout=30)
-            )
-    else:
-        await message.edit(content=f"Pelaajaa {gamertag} ei löydy Microsoft Xbox -palvelusta. Kirjoititko nimen oikein?")
+    async for client in get_client():
+        profile = await get_xbl_profiles(client, gamertag)
+        if profile:
+            player = await update_player(profile[0].gamertag, is_valid)
+            if player:
+                await message.edit(content=f"Päivitetty pelaajan {player.gamertag} tilaksi {player.is_valid}")
+            else:
+                await message.edit(
+                    content=f"Pelaajaa {gamertag} ei löytynyt tietokannasta. Haluatko lisätä pelaajan?",
+                    view=AddPlayerView(gamertag, is_valid, timeout=30)
+        )
+
     
     
 @bot.command(description="Get player info")
 async def player_info(ctx, gamertag:str):
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
-    profile = await get_profile(gamertag)
-    player = await get_player(profile.gamertag)
+    player = await get_player(gamertag)
     player_data = f"{player.gamertag}-{player.xuid} Pelatut pelit:{len(player.custom_matches)}"
     await message.edit(content=player_data)
     
     
 @bot.command(description="Get data of player's ranked performance")
 async def rank(ctx, gamertag: str):
-    match_history = await get_match_history(gamertag, 0, 25, "ranked")
     pass
     
     
@@ -212,8 +197,7 @@ async def validate_players(custom_players):
                                          view=ValidatePlayerView(custom_player, timeout=None))
 
 
-async def match_data_handler(match, date):
-    custom_match = await get_match(match.match_id)
+async def match_data_handler(custom_match, date):
     is_valid = await check_match_validity(custom_match, date)
     custom_players = await add_players_in_match(custom_match)
     await validate_players(custom_players)
@@ -225,39 +209,20 @@ async def match_data_handler(match, date):
         pass
 
 
-async def get_xuids(match):
-    custom_match = await get_match_data(match.match_id)
-    return custom_match.xuids
-
-
 async def find_all_custom_matches(player, date):
     start = 0
     index =0
     while True:
 
-        match_history = await get_match_history(player.gamertag,start=start, match_type='custom')
+        match_history = await fetch_player_match_data(player.gamertag,start=start, match_type='custom')
         if len(match_history) == 0:
             return
-        tasks = []
-        for match in match_history:
-            task = asyncio.create_task(get_xuids(match))
-            tasks.append(task)
-        nested_xuids = await asyncio.gather(*tasks)
-        xuids = list(set([item for sublist in nested_xuids for item in sublist]))
-        print(len(xuids))
-        print(xuids)
 
-        profiles = await get_xbl_profiles(xuids)
-        for profile in profiles:
-            try:
-                await add_custom_player(profile)
-            except IntegrityError:
-                pass
         match_tasks = []
-        for match in match_history:
+        for custom_match in match_history:
             index += 1
             yield player, index
-            task = asyncio.create_task(match_data_handler(match, date))
+            task = asyncio.create_task(match_data_handler(custom_match, date))
             match_tasks.append(task)
             
         await asyncio.gather(*match_tasks)
@@ -370,18 +335,11 @@ class SeriesView(discord.ui.View):
 @bot.command(description="Create a summary of played matches")
 async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type = "all"):
     msg = await ctx.respond(content="Haetaan matseja", ephemeral=True)
-    match_history = await get_match_history(gamertag, start=start, count=count, match_type=match_type)
-    custom_matches = []
+    match_history = await fetch_player_match_data(gamertag, start=start, count=count, match_type=match_type)
     index = 0
-    tasks = []
-    for match in match_history:
-        index += 1
-        task = asyncio.create_task(get_match(match.match_id))
-        tasks.append(task)
-        await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
-    custom_matches = await asyncio.gather(*tasks)
+    await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
             
-    select = MatchSelect(custom_matches)
+    select = MatchSelect(match_history)
     await msg.edit_original_response(content="", view=SeriesView(select))
 
 
@@ -391,9 +349,8 @@ async def fetch_new_matches():
     channel = await bot.fetch_channel(guild.log_channel_id)
     custom_players = await get_players()
     for player in custom_players:
-        match_history = await get_match_history(player.gamertag, count=25)
-        for match in match_history:
-            custom_match = await get_match(match.match_id)
+        match_history = await fetch_player_match_data(player.gamertag, count=25)
+        for custom_match in match_history:
             is_valid = await check_match_validity(custom_match)
             custom_players = await add_players_in_match(custom_match)
             await validate_players(custom_players)

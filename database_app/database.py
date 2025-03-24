@@ -19,6 +19,15 @@ async def engine_start() -> None:
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
+async def get_player(gamertag):
+    async with Session(engine) as session:
+        statement = select(CustomPlayer).where(CustomPlayer.gamertag == gamertag)
+        results = await session.exec(statement)
+        player = results.unique().first()
+
+        return player
+
+
 async def add_custom_player(profile, is_valid=False):
     player = CustomPlayer(gamertag=profile.gamertag, xuid=profile.xuid, is_valid=is_valid, custom_matches=[])
     async with Session(engine, expire_on_commit=False) as session:
@@ -32,15 +41,6 @@ async def add_custom_player(profile, is_valid=False):
             await session.rollback()
             raise e
 
-
-async def get_player(gamertag):
-    async with Session(engine) as session:
-        statement = select(CustomPlayer).where(CustomPlayer.gamertag == gamertag)
-        results = await session.exec(statement)
-        player = results.unique().first()
-    
-        return player
-        
 
 async def get_player_by_xuid(xuid):
     async with Session(engine) as session:
@@ -76,7 +76,7 @@ async def get_players():
 async def add_players_in_match(match):
     custom_players = []
     for player in match.players:
-        if player.xuid > 100:
+        if not player.xuid.startswith("bid"):
             try:
                 await add_custom_player(player)
             except IntegrityError:

@@ -1,7 +1,5 @@
 from spnkr.models.stats import MatchStats
 
-from . import get_gamemode_asset
-
 import datetime
 
 
