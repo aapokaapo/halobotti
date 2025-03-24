@@ -29,11 +29,11 @@ from collections import defaultdict
 
 async def generate_csr_graph(match_skills):
     # Extract CSR values from match_skills
-    csr_values = [match_skill.value[0].result.rank_recap.post_match_csr.value for match_skill in match_skills[::-1]]
+    csr_values = [match_skill.value[0].result.rank_recap.post_match_csr.value for match_skill in match_skills]
     num_matches = len(csr_values)
 
-    # Match indices
-    matches = list(range(1, num_matches + 1))
+    # Reverse match indices
+    matches = list(range(num_matches, 0, -1))
 
     # Matplotlib styling to match Discord theme
     plt.style.use("dark_background")
@@ -44,7 +44,7 @@ async def generate_csr_graph(match_skills):
     ax.fill_between(matches, csr_values, min(csr_values)-10, color='#7289DA', alpha=0.2)
 
     # Labels and title
-    ax.set_xlabel("Match Index", fontsize=12, color='white')
+    ax.set_xlabel("Match Number", fontsize=12, color='white')
     ax.set_ylabel("CSR", fontsize=12, color='white')
     ax.set_title("CSR Progression Over Matches", fontsize=14, color='white')
     ax.legend(facecolor='#2C2F33', edgecolor='white', fontsize=10)

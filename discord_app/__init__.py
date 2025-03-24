@@ -44,6 +44,7 @@ class PublishView(discord.ui.View):
 
         elif self.message:
             await self.message.channel.send(embeds=self.message.embeds)
+            await interaction.response.defer()
 
 
     pass
