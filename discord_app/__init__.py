@@ -1,5 +1,6 @@
 from asyncio import timeout
 from re import match
+import asyncio
 
 import discord
 from discord import Interaction
@@ -8,7 +9,7 @@ from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
 from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
-from spnkr_app import get_match, get_match_history, get_profile, get_profiles
+from spnkr_app import get_match, get_match_history, get_profile, get_profiles, get_xbl_profiles, get_match_data
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
     get_players, update_player, engine_start, get_all_channels,
@@ -49,13 +50,19 @@ async def startup():
 async def ping(ctx):  # a slash command will be created with the name "ping"
     await ctx.respond(f"Pong! Latency is {bot.latency}")
     start = time.time()
-    match_history = await get_match_history("AapoKaapo",0,25,"custom")
+    match_history = await get_match_history("svstematic",0,25,"custom")
     match_id = match_history[0].match_id
     match = await get_match(match_id)
     match_embed, files = await embeds.create_match_info(match)
     await ctx.channel.send(embed=match_embed, files=files)
     
-    matches = [await get_match(match.match_id) for match in match_history[1:5]]
+    tasks = []
+    for match in match_history[0:5]:
+        task = asyncio.create_task(get_match(match.match_id))
+        tasks.append(task)
+    matches = await asyncio.gather(*tasks)
+    
+    #matches = [await get_match(match.match_id) for match in match_history[1:5]]
     
     series_embed, files = await embeds.create_series_info(matches)
     await ctx.channel.send(embed=series_embed, files=files)
@@ -63,6 +70,11 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
     end = time.time()
     
     print("Took %f ms" % ((end - start) * 1000.0))
+    
+    xuids = []
+    for match in matches:
+        xuids += match.match_stats.xuids
+   
 
 
 @bot.command(description="Adds a player to the database")
@@ -148,6 +160,12 @@ async def player_info(ctx, gamertag:str):
     await message.edit(content=player_data)
     
     
+@bot.command(description="Get data of player's ranked performance")
+async def rank(ctx, gamertag: str):
+    match_history = await get_match_history(gamertag, 0, 25, "ranked")
+    pass
+    
+    
 @bot.command(description="Sets the text channel as log channel")
 @discord.default_permissions(administrator=True)
 async def set_log_channel(ctx, channel_id: Optional[int]=None):
@@ -194,6 +212,24 @@ async def validate_players(custom_players):
                                          view=ValidatePlayerView(custom_player, timeout=None))
 
 
+async def match_data_handler(match, date):
+    custom_match = await get_match(match.match_id)
+    is_valid = await check_match_validity(custom_match, date)
+    custom_players = await add_players_in_match(custom_match)
+    await validate_players(custom_players)
+
+    try:
+        await add_custom_match(custom_match, is_valid)
+        await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
+    except IntegrityError:
+        pass
+
+
+async def get_xuids(match):
+    custom_match = await get_match_data(match.match_id)
+    return custom_match.xuids
+
+
 async def find_all_custom_matches(player, date):
     start = 0
     index =0
@@ -202,23 +238,31 @@ async def find_all_custom_matches(player, date):
         match_history = await get_match_history(player.gamertag,start=start, match_type='custom')
         if len(match_history) == 0:
             return
+        tasks = []
         for match in match_history:
-            index += 1
-            custom_match = await get_match(match.match_id)
-            yield player, index
-            is_valid = await check_match_validity(custom_match, date)
-            custom_players = await add_players_in_match(custom_match)
-            await validate_players(custom_players)
+            task = asyncio.create_task(get_xuids(match))
+            tasks.append(task)
+        nested_xuids = await asyncio.gather(*tasks)
+        xuids = list(set([item for sublist in nested_xuids for item in sublist]))
+        print(len(xuids))
+        print(xuids)
 
+        profiles = await get_xbl_profiles(xuids)
+        for profile in profiles:
             try:
-                await add_custom_match(custom_match, is_valid)
-                await add_match_to_players(custom_match.match_stats.match_id, custom_match.players)
+                await add_custom_player(profile)
             except IntegrityError:
                 pass
+        match_tasks = []
+        for match in match_history:
+            index += 1
+            yield player, index
+            task = asyncio.create_task(match_data_handler(match, date))
+            match_tasks.append(task)
+            
+        await asyncio.gather(*match_tasks)
+            
         start += 25
-
-
-
 
 
 @bot.command(description="Populate database with custom matches")
@@ -328,20 +372,18 @@ async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Opti
     msg = await ctx.respond(content="Haetaan matseja", ephemeral=True)
     match_history = await get_match_history(gamertag, start=start, count=count, match_type=match_type)
     custom_matches = []
-    try:
-        index = 0
-        for match in match_history:
-            index += 1
-            custom_match = await get_match(match.match_id)
-            custom_matches.append(custom_match)
-            await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
+    index = 0
+    tasks = []
+    for match in match_history:
+        index += 1
+        task = asyncio.create_task(get_match(match.match_id))
+        tasks.append(task)
+        await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
+    custom_matches = await asyncio.gather(*tasks)
             
-        select = MatchSelect(custom_matches)
-        await msg.edit_original_response(content="", view=SeriesView(select))
+    select = MatchSelect(custom_matches)
+    await msg.edit_original_response(content="", view=SeriesView(select))
 
-    except ClientResponseError as e:
-        await msg.edit_original_response(content=f"Got an unexpected error {e}")
-    
 
 @tasks.loop(minutes=3)
 async def fetch_new_matches():
