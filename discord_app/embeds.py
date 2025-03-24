@@ -27,6 +27,47 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 
+async def generate_csr_graph(match_skills):
+    # Extract CSR values from match_skills
+    csr_values = [match_skill.value[0].result.rank_recap.post_match_csr.value for match_skill in match_skills[::-1]]
+    num_matches = len(csr_values)
+
+    # Match indices
+    matches = list(range(1, num_matches + 1))
+
+    # Matplotlib styling to match Discord theme
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    # Plot the CSR progression
+    ax.plot(matches, csr_values, marker='o', linestyle='-', color='#7289DA', markersize=6, label="CSR")
+    ax.fill_between(matches, csr_values, min(csr_values)-10, color='#7289DA', alpha=0.2)
+
+    # Labels and title
+    ax.set_xlabel("Match Index", fontsize=12, color='white')
+    ax.set_ylabel("CSR", fontsize=12, color='white')
+    ax.set_title("CSR Progression Over Matches", fontsize=14, color='white')
+    ax.legend(facecolor='#2C2F33', edgecolor='white', fontsize=10)
+
+    # Grid styling
+    ax.grid(color='#555', linestyle='dashed', linewidth=0.5, alpha=0.5)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('white')
+    ax.spines['bottom'].set_color('white')
+    ax.tick_params(axis='both', colors='white')
+
+    # Save the figure
+    # Save to BytesIO
+    img_buf = io.BytesIO()
+    plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True)
+    img_buf.seek(0)
+    plt.close()
+
+    return img_buf  # Return BytesIO object for Discord upload
+
+
+
 async def create_discord_table_image(data: List[str|int|float], columns: List[str]):
     """Generates a Discord-styled table image with a dark theme and modern styling."""
 
@@ -280,3 +321,16 @@ async def create_series_info(match_history: List[Match]):
     ]
     
     return series_embed, files
+
+
+async def create_rank_embed(player, custom_matches):
+    rank_embed = Embed(title=f"Ranked progression of {player.gamertag}")
+    image = await generate_csr_graph(custom_matches)
+    random_uuid = uuid.uuid4()
+    rank_embed.set_image(url=f"attachment://{random_uuid}.png")
+    files = [
+        File(image, f"{random_uuid}.png")
+    ]
+
+    return rank_embed, files
+

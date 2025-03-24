@@ -8,8 +8,8 @@ from discord.ext.pages import Page, Paginator, PaginatorButton
 from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
-from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info
-from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client
+from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info, create_rank_embed
+from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client, fetch_player_match_skills
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
     get_players, update_player, engine_start, get_all_channels,
@@ -141,14 +141,23 @@ async def _update_player(ctx, gamertag: str, is_valid: bool):
 @bot.command(description="Get player info")
 async def player_info(ctx, gamertag:str):
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
-    player = await get_player(gamertag)
-    player_data = f"{player.gamertag}-{player.xuid} Pelatut pelit:{len(player.custom_matches)}"
-    await message.edit(content=player_data)
+    async for client in get_client():
+        profile = await get_xbl_profiles(client, gamertag)
+        if profile:
+            player = await get_player(profile[0].gamertag)
+            player_data = f"{player.gamertag}-{player.xuid} Pelatut pelit:{len(player.custom_matches)}"
+            await message.edit(content=player_data)
     
     
 @bot.command(description="Get data of player's ranked performance")
 async def rank(ctx, gamertag: str):
-    pass
+    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
+    async for client in get_client():
+        profile = await get_xbl_profiles(client, gamertag)
+        if profile:
+            custom_matches = await fetch_player_match_skills(profile[0].gamertag)
+            embed, files = await create_rank_embed(profile[0], custom_matches)
+            await message.edit(embed=embed, files=files)
     
     
 @bot.command(description="Sets the text channel as log channel")

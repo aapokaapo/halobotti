@@ -131,6 +131,29 @@ async def get_gamemode_asset(client: HaloInfiniteClient, asset) -> UgcGameVarian
     return asset
 
 
+async def get_playlist_asset(client: HaloInfiniteClient, asset) -> Asset:
+    try:
+        resp = await client.discovery_ugc.get_playlist(
+            asset.asset_id,
+            asset.version_id
+        )
+        asset = await resp.parse()
+    except ClientResponseError as e:
+        if e.status == 404:
+            asset = None
+
+    return asset
+
+
+async def get_ranked_match_result(client, match):
+    if match.match_info.playlist:
+        playlist = await get_playlist_asset(client, match.match_info.playlist)
+        if playlist.public_name == "Ranked Arena":
+            return match
+
+    return None
+
+
 async def get_match_history(client, player: str|int, start: int=0, count: int=25, match_type="all"):
     looking_for_ranked = False
     if match_type == "ranked":
@@ -144,16 +167,21 @@ async def get_match_history(client, player: str|int, start: int=0, count: int=25
         match_history = await response.parse()
         if len(match_history.results) == 0:
             return results
-        for match in match_history.results:
-            if looking_for_ranked:
-                if not match.match_info.playlist.asset_id == RANKED_PLAYLIST:
-                    # match is not ranked, stop current iteration and take next
-                    continue
-            results.append(match)
-            if len(results) == count or len(match_history.results) < count:
-                return results
+
+        if looking_for_ranked:
+            async_tasks = []
+            for match in match_history.results:
+                task = get_ranked_match_result(client, match)
+                async_tasks.append(task)
+            ranked_matches = await asyncio.gather(*async_tasks)
+            results += [item for item in ranked_matches if item is not None]
+
+        else:
+            results += match_history.results
 
         start += 25
+
+    return results[:25]
 
 
 class BotPlayer(BaseModel):
@@ -202,6 +230,35 @@ async def fetch_player_match_data(gamertag: str|int, start=0, count=25, match_ty
         custom_matches = await asyncio.gather(*tasks)
 
         return custom_matches
+
+
+async def get_match_skills(client, match_id, xuids):
+    try:
+        resp = await client.skill.get_match_skill(match_id, xuids)
+        match_skill = await resp.parse()
+        return match_skill
+    except ClientResponseError as e:
+        if e.status == 404:
+            return None
+        else:
+            raise e
+
+
+
+
+async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_type="ranked"):
+    async for client in get_client():
+        match_history = await get_match_history(client, gamertag, start, count, match_type)
+        async_tasks =[]
+        profile = await get_xbl_profiles(client, gamertag)
+        for match_history_result in match_history:
+            match_skill = get_match_skills(client, match_history_result.match_id, [profile[0].xuid])
+            async_tasks.append(match_skill)
+        match_skills = await asyncio.gather(*async_tasks)
+        match_skills = [item for item in match_skills if item is not None]
+
+        return match_skills
+
 
 
 async def get_profile(gamertag: str|int):
