@@ -348,18 +348,18 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
 from spnkr_app.tools import estimate_tier
 from spnkr.models.skill import Counterfactual
 
-async def create_match_skill_embed(match_skill):
+async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Embed")
     for player in match_skill.value:
+        profile = next((item for item in profiles if wrap_xuid(profile.xuid) == player.id), None)
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
-        print(self_counterfactuals)
-        print(tier_counterfactuals)
+        
         expected_kills, expected_deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
         actual_kills, actual_deaths = player.result.stat_performances.kills.count, player.result.stat_performances.deaths.count
         estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
         performance_tier = await estimate_tier(Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals)
-        match_embed.add_field(name=f"{player.id}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nEstimated Rank: {estimated_tier}\nPerformance Rank: {performance_tier}", inline=False)
+        match_embed.add_field(name=f"{profile.gamertag}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nEstimated Rank: {estimated_tier}\nPerformance Rank: {performance_tier}", inline=False)
 
     return match_embed
 

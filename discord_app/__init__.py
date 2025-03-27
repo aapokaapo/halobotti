@@ -178,13 +178,17 @@ async def rank(ctx, gamertag: str):
             end_time = time.time()
             print("match_skills took %f ms" % ((end_time - start_time) * 1000.0))
             pages = []
+            print(match_skills[0].value[0])
+            xuids = [value.id for value in [match for match in match_skill_values]]
+            profiles = await get_xbl_profiles(client, xuids)
+            for match_skill in match_skills:
+                page = Page(embeds=[await create_match_skill_embed(profiles, match_skill)])
+                pages.append(page)
+            custom_view = PublishView()
+            
             embed, files = await create_rank_embed(profile[0], match_skills)
             summary_page = Page(embeds=[embed], files=files)
             pages.append(summary_page)
-            for match_skill in match_skills:
-                page = Page(embeds=[await create_match_skill_embed(match_skill)])
-                pages.append(page)
-            custom_view = PublishView()
             paginator = SeriesPaginator(pages=pages[::-1])
             custom_view.add_paginator(paginator)
             paginator.custom_view = custom_view
