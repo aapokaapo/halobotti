@@ -359,7 +359,7 @@ async def create_match_skill_embed(profiles, match_skill):
         actual_kills, actual_deaths = player.result.stat_performances.kills.count, player.result.stat_performances.deaths.count
         estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
         performance_tier = await estimate_tier(Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals)
-        match_embed.add_field(name=f"{profile.gamertag}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nEstimated Rank: {estimated_tier}\nPerformance Rank: {performance_tier}", inline=False)
+        match_embed.add_field(name=f"{profile.gamertag}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nHidden MMR: {estimated_tier}\nRank based on Performance: {performance_tier}", inline=False)
 
     return match_embed
 
