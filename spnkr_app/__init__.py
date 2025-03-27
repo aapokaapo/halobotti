@@ -1,5 +1,6 @@
 import asyncio
 
+from spnkr.models.skill import MatchSkill
 from spnkr.xuid import wrap_xuid
 from sqlalchemy.exc import IntegrityError
 
@@ -244,9 +245,7 @@ async def get_match_skills(client, match_id, xuids):
             raise e
 
 
-
-
-async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_type="ranked"):
+async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_type="ranked") -> List[MatchSkill]:
     async for client in get_client():
         start_time = time.time()
         match_history = await get_match_history(client, gamertag, start, count, match_type)
