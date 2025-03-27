@@ -256,8 +256,9 @@ async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_
         skill_tasks = []
         custom_match_tasks = []
         for match_history_result in match_history:
-            match_skill = get_match_skills(client, match_history_result.match_id, [profile[0].xuid])
-            
+            match_stats = await get_match_stats(client, match_history_result.match_id)
+            match_skill = get_match_skills(client, match_history_result.match_id, match_stats.xuids)
+
             skill_tasks.append(match_skill)
         match_skills = await asyncio.gather(*skill_tasks)
         match_skills = [item for item in match_skills if item is not None]

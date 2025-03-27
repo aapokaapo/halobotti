@@ -8,7 +8,8 @@ from discord.ext.pages import Page, Paginator, PaginatorButton
 from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
-from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info, create_rank_embed
+from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info, create_rank_embed, \
+    create_match_skill_embed
 from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client, fetch_player_match_skills
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
@@ -173,14 +174,21 @@ async def rank(ctx, gamertag: str):
         profile = await get_xbl_profiles(client, gamertag)
         if profile:
             start_time = time.time()
-            match_skills = await fetch_player_match_skills(profile[0].gamertag)
+            match_skills = await fetch_player_match_skills(profile[0].gamertag, count=20)
             end_time = time.time()
             print("match_skills took %f ms" % ((end_time - start_time) * 1000.0))
-            
-            # match_data = await fetch_player_match_data(profile[0].gamertag, match_type="ranked")
-            
+            pages = []
             embed, files = await create_rank_embed(profile[0], match_skills)
-            await message.edit_original_response(content="", embed=embed, files=files, view=PublishView())
+            summary_page = Page(embeds=[embed], files=files)
+            pages.append(summary_page)
+            for match_skill in match_skills:
+                page = Page(embeds=[await create_match_skill_embed(match_skill)])
+                pages.append(page)
+            custom_view = PublishView()
+            paginator = SeriesPaginator(pages=pages[::-1])
+            custom_view.add_paginator(paginator)
+            paginator.custom_view = custom_view
+            await paginator.respond(message, ephemeral=True)
     
     
 @bot.command(description="Sets the text channel as log channel")

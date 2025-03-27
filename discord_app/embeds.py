@@ -1,9 +1,13 @@
 from email.policy import default
 
 from discord import Embed, File
+from pydantic import BaseModel
 from spnkr.tools import OUTCOME_MAP, TEAM_MAP, MEDAL_NAME_MAP, unwrap_xuid, LIFECYCLE_MAP, BOT_MAP
 from aiohttp import ClientSession
 from typing import List
+
+from spnkr.xuid import wrap_xuid
+
 from spnkr_app import Match
 import uuid
 import math
@@ -28,9 +32,13 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 
-async def generate_csr_graph(match_skills):
+async def generate_csr_graph(player, match_skills):
     # Extract CSR values from match_skills
-    csr_values = [match_skill.value[0].result.rank_recap.post_match_csr.value for match_skill in match_skills]
+    csr_values = []
+    for match_skill in match_skills:
+        for player_skill in match_skill.value:
+            if player_skill.id == wrap_xuid(player.xuid):
+                csr_values.append(player_skill.result.rank_recap.post_match_csr.value)
     num_matches = len(csr_values)
 
     # Reverse match indices
@@ -337,40 +345,29 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
     return closest_kills, closest_deaths
 
 
+from spnkr_app.tools import estimate_tier
+from spnkr.models.skill import Counterfactual
+
+async def create_match_skill_embed(match_skill):
+    match_embed = Embed(title="Match Skill Embed")
+    for player in match_skill.value:
+        self_counterfactuals = player.result.counterfactuals.self_counterfactuals
+        tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
+        print(self_counterfactuals)
+        print(tier_counterfactuals)
+        expected_kills, expected_deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
+        actual_kills, actual_deaths = player.result.stat_performances.kills.count, player.result.stat_performances.deaths.count
+        estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
+        performance_tier = await estimate_tier(Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals)
+        match_embed.add_field(name=f"{player.id}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nEstimated Rank: {estimated_tier}\nPerformance Rank: {performance_tier}", inline=False)
+
+    return match_embed
 
 
 async def create_rank_embed(player, match_skills):
     rank_embed = Embed(title=f"Ranked progression of {player.gamertag}")
-    image = await generate_csr_graph(match_skills)
-    index = 0
-    for match_skill in match_skills:
-        self_counterfactuals = match_skill.value[0].result.counterfactuals.self_counterfactuals
-        tier_counterfactuals = match_skill.value[0].result.counterfactuals.tier_counterfactuals
-        index += 1
-        
-        kills, deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
-        
-        actual_kills, actual_deaths = match_skill.value[0].result.stat_performances.kills.count, match_skill.value[0].result.stat_performances.deaths.count
-        
-        description = f"{kills}/{deaths} Kills/Deaths: {actual_kills}/{actual_deaths} Kills/Deaths: {self_counterfactuals.kills:.2f}/{self_counterfactuals.deaths:.2f}\n"
-        
-        lower_tier = ""
-        higher_tier = ""
-        if kills == "Onyx":
-            lower_tier = "Diamond"
-        elif kills == "Diamond":
-            lower_tier = "Platinum"
-            higher_tier = "Onyx"
-        elif kills == "Platinum":
-            lower_tier = "Gold"
-            higher_tier = "Diamond"
-        
-        for rank, values in tier_counterfactuals.items():
-            if rank == lower_tier or rank == higher_tier or rank == kills:
-                description += f'{rank}:K{values.kills:.2f}/D{values.deaths:.2f}\n'
+    image = await generate_csr_graph(player, match_skills)
 
-        if len(rank_embed) + len(description) < 6000:
-            rank_embed.add_field(name=f"Match #{index}", value=description)
     random_uuid = uuid.uuid4()
     rank_embed.set_image(url=f"attachment://{random_uuid}.png")
     files = [
