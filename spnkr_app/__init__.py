@@ -181,7 +181,7 @@ async def get_match_history(client, player: str|int, start: int=0, count: int=25
 
         start += 25
 
-    return results[:25]
+    return results[:count]
 
 
 class BotPlayer(BaseModel):
@@ -193,7 +193,7 @@ class CustomMatch(BaseModel):
     match_stats: MatchStats
     match_gamemode: Optional[UgcGameVariant]
     match_map: Optional[Map]
-    players: List[CustomPlayer|BotPlayer]
+    players: Optional[List[CustomPlayer|BotPlayer]]
 
 
 async def create_custom_match(client, match_players, match_stats):
@@ -217,7 +217,7 @@ async def fetch_player_match_data(gamertag: str|int, start=0, count=25, match_ty
         xuids = []
         for match_stats in match_results:
             xuids += match_stats.xuids
-        xbl_profiles = await get_xbl_profiles(client, xuids)
+        xbl_profiles = await get_xbl_profiles(client, list(set(xuids)))
         async_tasks = []
         for profile in xbl_profiles:
             async_tasks.append(asyncio.create_task(add_xbl_profile_to_db(profile)))
@@ -248,13 +248,18 @@ async def get_match_skills(client, match_id, xuids):
 
 async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_type="ranked"):
     async for client in get_client():
+        start_time = time.time()
         match_history = await get_match_history(client, gamertag, start, count, match_type)
-        async_tasks =[]
+        end_time = time.time()
+        print("match_history took %f ms" % ((end_time - start_time) * 1000.0))
         profile = await get_xbl_profiles(client, gamertag)
+        skill_tasks = []
+        custom_match_tasks = []
         for match_history_result in match_history:
             match_skill = get_match_skills(client, match_history_result.match_id, [profile[0].xuid])
-            async_tasks.append(match_skill)
-        match_skills = await asyncio.gather(*async_tasks)
+            
+            skill_tasks.append(match_skill)
+        match_skills = await asyncio.gather(*skill_tasks)
         match_skills = [item for item in match_skills if item is not None]
 
         return match_skills

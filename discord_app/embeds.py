@@ -6,6 +6,7 @@ from aiohttp import ClientSession
 from typing import List
 from spnkr_app import Match
 import uuid
+import math
 
 async def get_map_image(map_asset):
     async with ClientSession() as session:
@@ -323,9 +324,53 @@ async def create_series_info(match_history: List[Match]):
     return series_embed, files
 
 
-async def create_rank_embed(player, custom_matches):
+async def find_closest_rank(counterfactuals, tier_counterfactuals):
+    def closest_by_stat(stat: str):
+        return min(
+            tier_counterfactuals,
+            key=lambda rank: abs(getattr(counterfactuals, stat) - getattr(tier_counterfactuals[rank], stat))
+        )
+
+    closest_kills = closest_by_stat("kills")
+    closest_deaths = closest_by_stat("deaths")
+
+    return closest_kills, closest_deaths
+
+
+
+
+async def create_rank_embed(player, match_skills):
     rank_embed = Embed(title=f"Ranked progression of {player.gamertag}")
-    image = await generate_csr_graph(custom_matches)
+    image = await generate_csr_graph(match_skills)
+    index = 0
+    for match_skill in match_skills:
+        self_counterfactuals = match_skill.value[0].result.counterfactuals.self_counterfactuals
+        tier_counterfactuals = match_skill.value[0].result.counterfactuals.tier_counterfactuals
+        index += 1
+        
+        kills, deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
+        
+        actual_kills, actual_deaths = match_skill.value[0].result.stat_performances.kills.count, match_skill.value[0].result.stat_performances.deaths.count
+        
+        description = f"{kills}/{deaths} Kills/Deaths: {actual_kills}/{actual_deaths} Kills/Deaths: {self_counterfactuals.kills:.2f}/{self_counterfactuals.deaths:.2f}\n"
+        
+        lower_tier = ""
+        higher_tier = ""
+        if kills == "Onyx":
+            lower_tier = "Diamond"
+        elif kills == "Diamond":
+            lower_tier = "Platinum"
+            higher_tier = "Onyx"
+        elif kills == "Platinum":
+            lower_tier = "Gold"
+            higher_tier = "Diamond"
+        
+        for rank, values in tier_counterfactuals.items():
+            if rank == lower_tier or rank == higher_tier or rank == kills:
+                description += f'{rank}:K{values.kills:.2f}/D{values.deaths:.2f}\n'
+
+        if len(rank_embed) + len(description) < 6000:
+            rank_embed.add_field(name=f"Match #{index}", value=description)
     random_uuid = uuid.uuid4()
     rank_embed.set_image(url=f"attachment://{random_uuid}.png")
     files = [

@@ -43,11 +43,8 @@ class PublishView(discord.ui.View):
             await self.paginator.respond(interaction)
 
         elif self.message:
+            await interaction.response.edit_message(view=None)
             await self.message.channel.send(embeds=self.message.embeds)
-            await interaction.response.defer()
-
-
-    pass
 
 
 async def add_channels_to_database():
@@ -57,8 +54,8 @@ async def add_channels_to_database():
         except IntegrityError:
             pass
 
-        channels = await get_all_channels()
-        print(f"Found {len(channels)} channels")
+    channels = await get_all_channels()
+    print(f"Found {len(channels)} channels")
 
 
 @bot.listen('on_ready', once=True)
@@ -155,9 +152,7 @@ async def _update_player(ctx, gamertag: str, is_valid: bool):
             else:
                 await message.edit(
                     content=f"Pelaajaa {gamertag} ei löytynyt tietokannasta. Haluatko lisätä pelaajan?",
-                    view=AddPlayerView(gamertag, is_valid, timeout=30)
-        )
-
+                    view=AddPlayerView(gamertag, is_valid, timeout=30))
     
     
 @bot.command(description="Get player info")
@@ -177,9 +172,15 @@ async def rank(ctx, gamertag: str):
     async for client in get_client():
         profile = await get_xbl_profiles(client, gamertag)
         if profile:
-            custom_matches = await fetch_player_match_skills(profile[0].gamertag)
-            embed, files = await create_rank_embed(profile[0], custom_matches)
-            await message.edit(content="", embed=embed, files=files, view=PublishView())
+            start_time = time.time()
+            match_skills = await fetch_player_match_skills(profile[0].gamertag)
+            end_time = time.time()
+            print("match_skills took %f ms" % ((end_time - start_time) * 1000.0))
+            
+            # match_data = await fetch_player_match_data(profile[0].gamertag, match_type="ranked")
+            
+            embed, files = await create_rank_embed(profile[0], match_skills)
+            await message.edit_original_response(content="", embed=embed, files=files, view=PublishView())
     
     
 @bot.command(description="Sets the text channel as log channel")
