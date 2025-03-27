@@ -149,7 +149,7 @@ async def get_playlist_asset(client: HaloInfiniteClient, asset) -> Asset:
 async def get_ranked_match_result(client, match):
     if match.match_info.playlist:
         playlist = await get_playlist_asset(client, match.match_info.playlist)
-        if playlist.public_name == "Ranked Arena":
+        if playlist and playlist.public_name == "Ranked Arena":
             return match
 
     return None
