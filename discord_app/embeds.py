@@ -66,6 +66,9 @@ async def generate_csr_graph(player, match_skills):
     ax.spines['bottom'].set_color('white')
     ax.tick_params(axis='both', colors='white')
 
+    # Set x-axis increments to 2
+    ax.set_xticks(range(num_matches, 0, -2))
+
     # Save the figure
     # Save to BytesIO
     img_buf = io.BytesIO()
@@ -74,6 +77,7 @@ async def generate_csr_graph(player, match_skills):
     plt.close()
 
     return img_buf  # Return BytesIO object for Discord upload
+
 
 
 
