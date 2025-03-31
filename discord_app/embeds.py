@@ -354,7 +354,7 @@ from spnkr.models.skill import Counterfactual
 
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Embed")
-    for player in match_skill.value:
+    for player in match_skill.value.sort(key= lambda player: player.result.team_id)
         profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
