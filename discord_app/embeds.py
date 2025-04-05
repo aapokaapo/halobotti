@@ -32,6 +32,90 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 
+import io
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+import matplotlib.patches as mpatches
+
+import io
+import matplotlib.pyplot as plt
+from datetime import timedelta
+
+async def create_kill_timeline(match_stats):
+    highlightevents = match_stats.film
+    stat_players = match_stats.match_stats.players
+    identity_players = match_stats.players
+
+    # Map xuid to team
+    xuid_to_team = {p.player_id: p.last_team_id for p in stat_players}
+
+    # Filter kill events
+    kill_events = [e for e in highlightevents if e.event_type == 'kill']
+    kill_events.sort(key=lambda e: e.time_ms)
+
+    # Organize events per team
+    team_kills = {}
+    for event in kill_events:
+        xuid = event.xuid
+        time = event.time_ms / 1000
+        team_id = xuid_to_team.get(f"xuid({xuid})", -1)
+        if team_id not in team_kills:
+            team_kills[team_id] = []
+        team_kills[team_id].append(time)
+
+    # Colors for teams
+    team_colors = {
+        0: '#7289DA',  # Blue (Eagle)
+        1: '#FF5555',  # Red (Cobra)
+        2: '#43B581',
+        3: '#FAA61A',
+    }
+    team_labels = {
+        0: "Eagle",
+        1: "Cobra",
+        2: "Team 2",
+        3: "Team 3",
+    }
+
+    # Plot setup
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    for team_id, times in team_kills.items():
+        times.sort()
+        cumulative = list(range(1, len(times)+1))
+        ax.plot(
+            [str(timedelta(seconds=t)) for t in times],
+            cumulative,
+            label=team_labels.get(team_id, f"Team {team_id}"),
+            color=team_colors.get(team_id, 'gray'),
+            linewidth=2
+        )
+
+    # Styling
+    ax.set_xlabel("Time", color='white')
+    ax.set_ylabel("Kill Count", color='white')
+    ax.set_title("Cumulative Kills Over Time", fontsize=14, color='white')
+    ax.tick_params(axis='x', rotation=45, colors='white')
+    ax.tick_params(axis='y', colors='white')
+    ax.grid(color='#444', linestyle='dashed', alpha=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_color('white')
+    ax.spines['left'].set_color('white')
+    ax.legend(title="Team", facecolor='#2C2F33', edgecolor='white', fontsize=9, title_fontsize=10)
+
+    # Save to buffer
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
+    buf.seek(0)
+    plt.close()
+
+    return buf
+
+   
+
 async def generate_csr_graph(player, match_skills):
     # Extract CSR values from match_skills
     csr_values = []
@@ -354,7 +438,7 @@ from spnkr.models.skill import Counterfactual
 
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Embed")
-    for player in match_skill.value.sort(key= lambda player: player.result.team_id)
+    for player in match_skill.value.sort(key= lambda player: player.result.team_id):
         profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
@@ -379,4 +463,15 @@ async def create_rank_embed(player, match_skills):
     ]
 
     return rank_embed, files
+
+
+async def create_kills_embed(match):
+    kills_embed = Embed(title=f"Kills relative to time")
+    image = await create_kill_timeline(match)
+    kills_embed.set_image(url=f"attachment://kills.png")
+    files = [
+        File(image, f"kills.png")
+    ]
+    
+    return kills_embed, files
 

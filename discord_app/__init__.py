@@ -9,8 +9,8 @@ from discord.ext import tasks
 from spnkr.tools import LIFECYCLE_MAP
 
 from discord_app.embeds import create_aggregated_match_table, create_series_info, create_match_info, create_rank_embed, \
-    create_match_skill_embed
-from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client, fetch_player_match_skills
+    create_match_skill_embed, create_kills_embed
+from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client, fetch_player_match_skills, fetch_film
 from database_app.database import (
     add_custom_player, add_custom_match, add_channel, get_player, update_channel,
     get_players, update_player, engine_start, get_all_channels,
@@ -73,6 +73,11 @@ async def ping(ctx):  # a slash command will be created with the name "ping"
     match_data = await fetch_player_match_data("AapoKaapo")
     match_embed, files = await embeds.create_match_info(match_data[0])
     await ctx.channel.send(embed=match_embed, files=files)
+    
+    kills_embed, files = await create_kills_embed(match_data[0])
+    
+    await ctx.channel.send(embed=kills_embed, files=files)
+    
 
     series_embed, files = await embeds.create_series_info(match_data[0:5])
     await ctx.channel.send(embed=series_embed, files=files,)

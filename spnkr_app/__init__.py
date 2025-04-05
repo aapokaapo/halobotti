@@ -16,6 +16,7 @@ import time
 from database_app.database import get_player_by_xuid, add_custom_player
 from database_app.models import CustomPlayer
 from spnkr.tools import unwrap_xuid, BOT_MAP
+from spnkr.film import HighlightEvent, read_highlight_events
 
 RANKED_PLAYLIST = "edfef3ac-9cbe-4fa2-b949-8f29deafd483"
 
@@ -144,7 +145,12 @@ async def get_playlist_asset(client: HaloInfiniteClient, asset) -> Asset:
             asset = None
 
     return asset
-
+    
+    
+async def fetch_film(client, match_id):
+    film_events = await read_highlight_events(client, match_id)
+    return film_events
+            
 
 async def get_ranked_match_result(client, match):
     if match.match_info.playlist:
@@ -195,6 +201,7 @@ class CustomMatch(BaseModel):
     match_gamemode: Optional[UgcGameVariant]
     match_map: Optional[Map]
     players: Optional[List[CustomPlayer|BotPlayer]]
+    film: Optional[List[HighlightEvent]]
 
 
 async def create_custom_match(client, match_players, match_stats):
@@ -202,7 +209,8 @@ async def create_custom_match(client, match_players, match_stats):
     bots = [BotPlayer(gamertag=BOT_MAP[player.player_id], xuid=player.player_id) for player in match_stats.players if player.player_id not in [wrap_xuid(profile.xuid) for profile in profiles]]
     gamemode_asset = await get_gamemode_asset(client, match_stats.match_info.ugc_game_variant)
     map_asset = await get_map_asset(client, match_stats.match_info.map_variant)
-    custom_match = CustomMatch(match_stats=match_stats, match_gamemode=gamemode_asset, match_map=map_asset, players=profiles+bots)
+    film_asset = await fetch_film(client, match_stats.match_id)
+    custom_match = CustomMatch(match_stats=match_stats, match_gamemode=gamemode_asset, match_map=map_asset, players=profiles+bots, film=film_asset)
 
     return custom_match
 
@@ -263,7 +271,6 @@ async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_
         match_skills = [item for item in match_skills if item is not None]
 
         return match_skills
-
 
 
 async def get_profile(gamertag: str|int):
