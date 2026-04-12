@@ -99,18 +99,18 @@ async def create_discord_table_image(data: List[str|int|float], columns: List[st
     table.set_fontsize(12)  # Slightly larger font
     table.auto_set_column_width([i for i in range(len(columns))])
 
-    for i in table._cells:
-        cell = table._cells[i]
+    for cell_key in table._cells:
+        cell = table._cells[cell_key]
         cell.set_edgecolor(border_color)  # Subtle thin border
         cell.set_linewidth(0.7)  # Thin border
         cell.set_height(0.15)  # Increase row height
 
         # Header styling
-        if i[0] == 0:
+        if cell_key[0] == 0:
             cell.set_facecolor(header_color)
             cell.set_text_props(color=text_color, weight='bold')
         else:  # Data row styling
-            cell.set_facecolor(bg_color if i[0] % 2 == 0 else alt_row_color)
+            cell.set_facecolor(bg_color if cell_key[0] % 2 == 0 else alt_row_color)
             cell.set_text_props(color=text_color)
 
     # Save to BytesIO
@@ -340,7 +340,7 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
 
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Embed")
-    for player in match_skill.value.sort(key=lambda player: player.result.team_id):
+    for player in sorted(match_skill.value, key=lambda player: player.result.team_id):
         profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
