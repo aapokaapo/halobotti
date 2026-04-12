@@ -44,7 +44,7 @@ def _configure_matplotlib_style() -> None:
 def _save_figure_to_buffer() -> io.BytesIO:
     """Save the current matplotlib figure to a BytesIO buffer and close it."""
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
     buf.seek(0)
     plt.close()
     return buf
