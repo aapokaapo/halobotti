@@ -1,16 +1,18 @@
-from email.policy import default
+import io
+import uuid
+from collections import defaultdict
 
 from discord import Embed, File
-from pydantic import BaseModel
-from spnkr.tools import OUTCOME_MAP, TEAM_MAP, MEDAL_NAME_MAP, unwrap_xuid, LIFECYCLE_MAP, BOT_MAP
+from spnkr.models.skill import Counterfactual
+from spnkr.tools import OUTCOME_MAP, TEAM_MAP, unwrap_xuid, LIFECYCLE_MAP, BOT_MAP
+from spnkr.xuid import wrap_xuid
+from spnkr_app import Match
+from spnkr_app.tools import estimate_tier
 from aiohttp import ClientSession
 from typing import List
 
-from spnkr.xuid import wrap_xuid
+import matplotlib.pyplot as plt
 
-from spnkr_app import Match
-import uuid
-import math
 
 async def get_map_image(map_asset):
     async with ClientSession() as session:
@@ -26,95 +28,6 @@ async def get_map_image(map_asset):
 
     return map_image_url
 
-import io
-import matplotlib.pyplot as plt
-
-from collections import defaultdict
-
-
-import io
-import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-import matplotlib.patches as mpatches
-
-import io
-import matplotlib.pyplot as plt
-from datetime import timedelta
-
-async def create_kill_timeline(match_stats):
-    highlightevents = match_stats.film
-    stat_players = match_stats.match_stats.players
-    identity_players = match_stats.players
-
-    # Map xuid to team
-    xuid_to_team = {p.player_id: p.last_team_id for p in stat_players}
-
-    # Filter kill events
-    kill_events = [e for e in highlightevents if e.event_type == 'kill']
-    kill_events.sort(key=lambda e: e.time_ms)
-
-    # Organize events per team
-    team_kills = {}
-    for event in kill_events:
-        xuid = event.xuid
-        time = event.time_ms / 1000
-        team_id = xuid_to_team.get(f"xuid({xuid})", -1)
-        if team_id not in team_kills:
-            team_kills[team_id] = []
-        team_kills[team_id].append(time)
-
-    # Colors for teams
-    team_colors = {
-        0: '#7289DA',  # Blue (Eagle)
-        1: '#FF5555',  # Red (Cobra)
-        2: '#43B581',
-        3: '#FAA61A',
-    }
-    team_labels = {
-        0: "Eagle",
-        1: "Cobra",
-        2: "Team 2",
-        3: "Team 3",
-    }
-
-    # Plot setup
-    plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(6, 5))
-
-    for team_id, times in team_kills.items():
-        times.sort()
-        cumulative = list(range(1, len(times)+1))
-        ax.plot(
-            [str(timedelta(seconds=t)) for t in times],
-            cumulative,
-            label=team_labels.get(team_id, f"Team {team_id}"),
-            color=team_colors.get(team_id, 'gray'),
-            linewidth=2
-        )
-
-    # Styling
-    ax.set_xlabel("Time", color='white')
-    ax.set_ylabel("Kill Count", color='white')
-    ax.set_title("Cumulative Kills Over Time", fontsize=14, color='white')
-    ax.tick_params(axis='x', rotation=45, colors='white')
-    ax.tick_params(axis='y', colors='white')
-    ax.grid(color='#444', linestyle='dashed', alpha=0.3)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color('white')
-    ax.spines['left'].set_color('white')
-    ax.legend(title="Team", facecolor='#2C2F33', edgecolor='white', fontsize=9, title_fontsize=10)
-
-    # Save to buffer
-    buf = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
-    buf.seek(0)
-    plt.close()
-
-    return buf
-
-   
 
 async def generate_csr_graph(player, match_skills):
     # Extract CSR values from match_skills
@@ -153,7 +66,6 @@ async def generate_csr_graph(player, match_skills):
     # Set x-axis increments to 2
     ax.set_xticks(range(num_matches, 0, -2))
 
-    # Save the figure
     # Save to BytesIO
     img_buf = io.BytesIO()
     plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True)
@@ -161,8 +73,6 @@ async def generate_csr_graph(player, match_skills):
     plt.close()
 
     return img_buf  # Return BytesIO object for Discord upload
-
-
 
 
 async def create_discord_table_image(data: List[str|int|float], columns: List[str]):
@@ -189,21 +99,19 @@ async def create_discord_table_image(data: List[str|int|float], columns: List[st
     table.set_fontsize(12)  # Slightly larger font
     table.auto_set_column_width([i for i in range(len(columns))])
 
-
-    for i, key in table._cells.items():
-        cell = table._cells[i]
+    for cell_key in table._cells:
+        cell = table._cells[cell_key]
         cell.set_edgecolor(border_color)  # Subtle thin border
         cell.set_linewidth(0.7)  # Thin border
         cell.set_height(0.15)  # Increase row height
 
         # Header styling
-        if i[0] == 0:  
+        if cell_key[0] == 0:
             cell.set_facecolor(header_color)
             cell.set_text_props(color=text_color, weight='bold')
         else:  # Data row styling
-            cell.set_facecolor(bg_color if i[0] % 2 == 0 else alt_row_color)
+            cell.set_facecolor(bg_color if cell_key[0] % 2 == 0 else alt_row_color)
             cell.set_text_props(color=text_color)
-
 
     # Save to BytesIO
     img_buf = io.BytesIO()
@@ -214,12 +122,11 @@ async def create_discord_table_image(data: List[str|int|float], columns: List[st
     return img_buf  # Return BytesIO object for Discord upload
 
 
-
 async def create_match_description(matches: list[Match]) -> str:
     """Generates a description string for a Discord embed based on multiple matches."""
-    
+
     descriptions = []
-    
+
     for match in matches:
         match_map = match.match_map.public_name
         match_mode = match.match_gamemode.public_name
@@ -228,7 +135,7 @@ async def create_match_description(matches: list[Match]) -> str:
     description = "**Match History**\n" + "\n".join(descriptions)
 
     return description
-    
+
 
 async def create_aggregated_match_table(matches: list[Match]):
     header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'K/D', 'Assists', 'Damage Dealt', 'Damage Taken', 'Damage Diff', 'Shots Hit', 'Shots Fired', 'Accuracy']
@@ -243,7 +150,7 @@ async def create_aggregated_match_table(matches: list[Match]):
                     gamertag = BOT_MAP[match_player.player_id]
                 core_stats = team.stats.core_stats
                 team_name = f"{TEAM_MAP[team.team_id]}" if match.match_stats.match_info.teams_enabled else "FFA"
-                
+
                 # Aggregate stats per player
                 if gamertag not in player_totals:
                     player_totals[gamertag] = [team_name, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Init with team name
@@ -272,13 +179,13 @@ async def create_aggregated_match_table(matches: list[Match]):
     values.sort(key=lambda value: value[1])  # Sort by team
 
     img_buf = await create_discord_table_image(values, header)
-    
+
     return img_buf
-    
-    
+
+
 async def create_match_table(match: Match):
-    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'K/D', 'Assists', 'Damage Dealt', 'Damage Taken', 'Damage Diff','Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
-    values=[]
+    header = ['Gamertag', 'Team', 'Score', 'Kills', 'Deaths', 'K/D', 'Assists', 'Damage Dealt', 'Damage Taken', 'Damage Diff', 'Shots Hit', 'Shots Fired', 'Accuracy', 'Outcome']
+    values = []
     for match_player in match.match_stats.players:
         for team in match_player.player_team_stats:
             if match_player.is_human:
@@ -288,27 +195,27 @@ async def create_match_table(match: Match):
             core_stats = team.stats.core_stats
             team_name = f"{TEAM_MAP[team.team_id]}" if match.match_stats.match_info.teams_enabled else "FFA"
             player_stats = [
-                gamertag, 
-                f"{team_name}", 
-                core_stats.personal_score, 
-                core_stats.kills, 
-                core_stats.deaths, 
+                gamertag,
+                f"{team_name}",
+                core_stats.personal_score,
+                core_stats.kills,
+                core_stats.deaths,
                 f"{core_stats.kills / core_stats.deaths if core_stats.deaths > 0 else core_stats.kills:.02f}",
-                core_stats.assists, 
-                core_stats.damage_dealt, 
-                core_stats.damage_taken, 
+                core_stats.assists,
+                core_stats.damage_dealt,
+                core_stats.damage_taken,
                 core_stats.damage_dealt - core_stats.damage_taken,
-                core_stats.shots_hit, 
-                core_stats.shots_fired, 
-                core_stats.accuracy, 
+                core_stats.shots_hit,
+                core_stats.shots_fired,
+                core_stats.accuracy,
                 f"{OUTCOME_MAP[match_player.outcome]}"
-                ]
+            ]
             values.append(player_stats)
 
     values.sort(key=lambda value: value[1])
-            
+
     img_buf = await create_discord_table_image(values, header)
-        
+
     return img_buf
 
 
@@ -318,11 +225,11 @@ async def create_match_info(match):
     match_gamemode = f"{match.match_gamemode.public_name}"
     match_map = f"{match.match_map.public_name}"
     playtime = f"{str(match.match_stats.match_info.playable_duration)}"
-    
+
     description = "\n".join([team_stats, match_gamemode, match_map, playtime])
-    
+
     match_embed = Embed(title=title, description=description)
-    
+
     teams = dict()
     for player in match.match_stats.players:
         if player.is_human:
@@ -338,21 +245,20 @@ async def create_match_info(match):
         for team_id, team in teams.items():
             match_embed.add_field(name=f"{TEAM_MAP[team_id]}", value="\n".join([player[0] for player in team]))
     else:
-        match_embed.add_field(name="Players", value="\n".join([player.gamertag for player in match.players ]))
-    
+        match_embed.add_field(name="Players", value="\n".join([player.gamertag for player in match.players]))
 
     match_embed.set_thumbnail(url=await get_map_image(match.match_map))
     match_embed.set_author(name="HaloBotti 2.0")
     match_embed.set_footer(text="HaloBotti 2.0 by AapoKaapo", icon_url="https://halofin.land/HaloFinland.png")
-    
+
     image = await create_match_table(match)
     match_embed.set_image(url=f"attachment://{match.match_stats.match_id}.png")
     files = [
         File(image, f"{match.match_stats.match_id}.png")
     ]
-    
+
     return match_embed, files
-    
+
 
 async def determine_team_outcomes(match_history: List[Match]):
     match_data = []
@@ -378,8 +284,7 @@ async def determine_team_outcomes(match_history: List[Match]):
             team_players_set = {existing_player for existing_player in team["players"]}
 
             # Check if a team with the same players already exists
-            existing_team = next((t for t in match_data if set(t["players"]) == team_players_set), None
-            )
+            existing_team = next((t for t in match_data if set(t["players"]) == team_players_set), None)
             if existing_team:
                 existing_team["outcomes"].append(outcome)
             else:
@@ -387,19 +292,19 @@ async def determine_team_outcomes(match_history: List[Match]):
                     "players": team["players"],
                     "outcomes": [outcome]
                 })
-                
+
     return match_data
 
 
 async def create_series_info(match_history: List[Match]):
     title = "Series"
-    
+
     description = await create_match_description(match_history)
-    
+
     series_embed = Embed(title=title, description=description)
-    
+
     teams_and_outcomes = await determine_team_outcomes(match_history)
-    
+
     index = 0
     for team in teams_and_outcomes:
         index += 1
@@ -409,14 +314,14 @@ async def create_series_info(match_history: List[Match]):
         tie_sum = team["outcomes"].count("TIE")
         loss_sum = team["outcomes"].count("LOSS")
         series_embed.add_field(name=f"Team #{index}- W:{win_sum}/T:{tie_sum}/L:{loss_sum}", value=f"{players}\n**Maps**:\n{outcomes}")
-    
+
     image = await create_aggregated_match_table(match_history)
     random_uuid = uuid.uuid4()
     series_embed.set_image(url=f"attachment://{random_uuid}.png")
     files = [
         File(image, f"{random_uuid}.png")
     ]
-    
+
     return series_embed, files
 
 
@@ -433,16 +338,13 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
     return closest_kills, closest_deaths
 
 
-from spnkr_app.tools import estimate_tier
-from spnkr.models.skill import Counterfactual
-
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Embed")
-    for player in match_skill.value.sort(key= lambda player: player.result.team_id):
+    for player in sorted(match_skill.value, key=lambda player: player.result.team_id):
         profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
-        
+
         expected_kills, expected_deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
         actual_kills, actual_deaths = player.result.stat_performances.kills.count, player.result.stat_performances.deaths.count
         estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
@@ -463,15 +365,3 @@ async def create_rank_embed(player, match_skills):
     ]
 
     return rank_embed, files
-
-
-async def create_kills_embed(match):
-    kills_embed = Embed(title=f"Kills relative to time")
-    image = await create_kill_timeline(match)
-    kills_embed.set_image(url=f"attachment://kills.png")
-    files = [
-        File(image, f"kills.png")
-    ]
-    
-    return kills_embed, files
-
