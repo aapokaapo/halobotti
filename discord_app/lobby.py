@@ -353,11 +353,23 @@ async def fetch_playlist_wait_times() -> Optional[dict]:
         logger.error("player_cache is None – cannot authenticate to lobby WebSocket")
         return None
 
+    if not spnkr_app.player_cache.is_valid:
+        logger.error("player_cache has expired tokens – cannot authenticate to lobby WebSocket")
+        return None
+
     spartan_token = spnkr_app.player_cache.spartan_token.token
+    if not spartan_token.startswith("v4="):
+        logger.warning("Spartan token is missing 'v4=' prefix; prepending it automatically")
+        spartan_token = f"v4={spartan_token}"
     clearance_token = spnkr_app.player_cache.clearance_token.token
+
     headers = {
+        "Accept": "application/x-bond-compact-binary",
+        "Accept-Language": "en-US",
+        "User-Agent": "SHIVA-2043073184/6.10025.12948.0 (release; PC)",
+        "343-Telemetry-Session-Id": str(uuid.uuid4()),
         "X-343-Authorization-Spartan": spartan_token,
-        "343-Clearance": clearance_token,
+        "343-clearance": clearance_token,
     }
 
     playlist_entries: list[dict] = []
