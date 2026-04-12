@@ -1,20 +1,54 @@
 import io
 import uuid
 from collections import defaultdict
-
-from discord import Embed, File
-from spnkr.models.skill import Counterfactual
-from spnkr.tools import OUTCOME_MAP, TEAM_MAP, unwrap_xuid, LIFECYCLE_MAP, BOT_MAP
-from spnkr.xuid import wrap_xuid
-from spnkr_app import Match
-from spnkr_app.tools import estimate_tier
-from aiohttp import ClientSession
-from typing import List
+from typing import List, Optional
 
 import matplotlib.pyplot as plt
+from aiohttp import ClientSession
+from discord import Embed, File
+from spnkr.models.skill import Counterfactual
+from spnkr.tools import BOT_MAP, LIFECYCLE_MAP, OUTCOME_MAP, TEAM_MAP, unwrap_xuid
+from spnkr.xuid import wrap_xuid
+
+from spnkr_app import Match
+from spnkr_app.tools import estimate_tier
+
+# Discord dark-theme colour palette used for matplotlib graphs
+DISCORD_COLORS = {
+    'bg': '#2C2F33',
+    'text': '#DCDDDE',
+    'header': '#7289DA',
+    'alt_row': '#23272A',
+    'border': '#99AAB5',
+}
+
+MATPLOTLIB_FIGSIZE_GRAPH = (10, 5)
+MATPLOTLIB_FONT_SIZE = 12
+MATPLOTLIB_TITLE_SIZE = 14
 
 
-async def get_map_image(map_asset):
+def _configure_matplotlib_style() -> None:
+    """Apply Discord dark-theme styling to matplotlib."""
+    plt.rcParams.update({
+        'figure.facecolor': DISCORD_COLORS['bg'],
+        'axes.facecolor': DISCORD_COLORS['bg'],
+        'text.color': DISCORD_COLORS['text'],
+        'axes.labelcolor': DISCORD_COLORS['text'],
+        'xtick.color': DISCORD_COLORS['text'],
+        'ytick.color': DISCORD_COLORS['text'],
+    })
+
+
+def _save_figure_to_buffer() -> io.BytesIO:
+    """Save the current matplotlib figure to a BytesIO buffer and close it."""
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    plt.close()
+    return buf
+
+
+async def get_map_image(map_asset) -> str:
     async with ClientSession() as session:
         map_image_url = map_asset.files.prefix + "images/thumbnail.jpg"
         response = await session.get(map_image_url)

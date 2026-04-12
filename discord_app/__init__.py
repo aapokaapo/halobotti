@@ -1,80 +1,39 @@
-import asyncio
 import time
+from typing import Optional
 
 import discord
+from aiohttp import ClientSession
 from discord import Interaction
 from discord.ext.pages import Page, Paginator
 from spnkr.tools import LIFECYCLE_MAP
 
-from discord_app.embeds import create_series_info, create_match_info, create_rank_embed, create_match_skill_embed
-from spnkr_app import fetch_player_match_data, get_xbl_profiles, get_client, fetch_player_match_skills
 from database_app.database import engine_start
-from typing import Optional
-from aiohttp import ClientSession
-
+from discord_app.embeds import (
+    create_match_info,
+    create_match_skill_embed,
+    create_rank_embed,
+    create_series_info,
+)
+from spnkr_app import fetch_player_match_data, fetch_player_match_skills, get_client, get_xbl_profiles
 
 bot = discord.Bot()
 
-import aiohttp
-import json
 
-# Add this function to fetch wait times from the Halo Infinite playlist API
-async def fetch_playlist_wait_times():
-    """
-    Fetch wait times for Halo Infinite playlists.
-    Returns a dict with playlist names and their wait times.
+async def fetch_playlist_wait_times() -> Optional[dict]:
+    """Fetch wait times for Halo Infinite playlists from the 343 Industries API.
+
+    Returns a dict with playlist data, or None on failure.
     """
     url = "https://halostats.343industries.com/api/v1/playlist-info"
-    
     try:
-        async with aiohttp.ClientSession() as session:
+        async with ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    return data
-                else:
-                    return None
+                    return await response.json()
+                return None
     except Exception as e:
-        print(f"Error fetching wait times: {e}")
+        print(f"Virhe odotusaikojen haussa: {e}")
         return None
-
-
-# Add this command to your bot
-@bot.command(description="Get Ranked Arena playlist wait time")
-async def ranked_arena_wait(ctx):
-    message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
-    
-    wait_times = await fetch_playlist_wait_times()
-    
-    if wait_times is None:
-        await message.edit(content="Virhe: Ei voitu hakea odotusaikoja")
-        return
-    
-    # Find Ranked Arena playlist in the response
-    ranked_arena = None
-    for playlist in wait_times.get("playlists", []):
-        if "ranked arena" in playlist.get("name", "").lower():
-            ranked_arena = playlist
-            break
-    
-    if ranked_arena:
-        wait_time = ranked_arena.get("averageWaitTime", 0)
-        # Convert milliseconds to seconds
-        wait_seconds = wait_time / 1000
-        minutes = int(wait_seconds // 60)
-        seconds = int(wait_seconds % 60)
-        
-        embed = discord.Embed(
-            title="Ranked Arena Odotusaika",
-            description=f"**{minutes}m {seconds}s**",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Playlist", value=ranked_arena.get("name", "Ranked Arena"))
-        embed.add_field(name="Status", value="🟢 Online" if ranked_arena.get("isEnabled") else "🔴 Offline")
-        
-        await message.edit(embed=embed)
-    else:
-        await message.edit(content="Virhe: Ranked Arena-pelilistaa ei löydy")
 
 
 class PublishView(discord.ui.View):
@@ -102,12 +61,16 @@ async def startup():
     await engine_start()
 
 
-@bot.command(description="Get data of player's ranked performance")
-async def rank(ctx, gamertag: str):
+@bot.command(description="Hae pelaajan ranked-suoritus")
+async def rank(ctx, gamertag: str) -> None:
+    """Näytä pelaajan CSR-eteneminen ja viimeiset ranked-matsit."""
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data", ephemeral=True)
-    async for client in get_client():
-        profile = await get_xbl_profiles(client, gamertag)
-        if profile:
+    try:
+        async for client in get_client():
+            profile = await get_xbl_profiles(client, gamertag)
+            if not profile:
+                await message.edit_original_response(content=f"Virhe: Pelaajaa '{gamertag}' ei löydy")
+                return
             start_time = time.time()
             match_skills = await fetch_player_match_skills(profile[0].gamertag, count=20)
             end_time = time.time()
@@ -130,23 +93,14 @@ async def rank(ctx, gamertag: str):
             custom_view.add_paginator(paginator)
             paginator.custom_view = custom_view
             await paginator.respond(message, ephemeral=True)
-
-
-async def fetch_playlist_wait_times():
-    url = "https://halostats.343industries.com/api/v1/playlist-info"
-    try:
-        async with ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    return await response.json()
-                return None
     except Exception as e:
-        print(f"Virhe odotusaikojen haussa: {e}")
-        return None
+        print(f"Virhe rank-komennossa: {e}")
+        await message.edit_original_response(content="Virhe: Ranked-datan hakeminen epäonnistui")
 
 
 @bot.command(description="Hae Ranked Arena -pelilistauksen odotusaika")
-async def wait_time(ctx):
+async def wait_time(ctx) -> None:
+    """Näytä Ranked Arena -pelilistauksen arvioitu odotusaika."""
     message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
     data = await fetch_playlist_wait_times()
 
@@ -235,12 +189,18 @@ class SeriesView(discord.ui.View):
             await self.message.edit(delete_after=0)
 
 
-@bot.command(description="Create a summary of played matches")
-async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type="all"):
-    msg = await ctx.respond(content="Haetaan matseja", ephemeral=True)
-    match_history = await fetch_player_match_data(gamertag, start=start, count=count, match_type=match_type)
-    index = 0
-    await msg.edit_original_response(content=f"Haetaan matseja... ({index}/{count})")
-
-    select = MatchSelect(match_history)
-    await msg.edit_original_response(content="", view=SeriesView(select))
+@bot.command(description="Luo yhteenveto pelatuista matseista")
+async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type: str = "all") -> None:
+    """Hae pelaajan matsit ja luo niistä sarjayhteenveto valintanäkymällä."""
+    msg = await ctx.respond(content="Haetaan matseja...", ephemeral=True)
+    try:
+        match_history = await fetch_player_match_data(gamertag, start=start, count=count, match_type=match_type)
+        if not match_history:
+            await msg.edit_original_response(content="Virhe: Matseja ei löydy annetuilla hakuehdoilla")
+            return
+        await msg.edit_original_response(content=f"Haetaan matseja... ({len(match_history)}/{count})")
+        select = MatchSelect(match_history)
+        await msg.edit_original_response(content="", view=SeriesView(select))
+    except Exception as e:
+        print(f"Virhe make_series-komennossa: {e}")
+        await msg.edit_original_response(content="Virhe: Matsien hakeminen epäonnistui")
