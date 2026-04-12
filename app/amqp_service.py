@@ -12,8 +12,10 @@ Protocol state machine
 4. Receive   – on server TRANSFER, parse Bond payload, close socket.
 """
 
+import asyncio
 import logging
 import struct
+import time
 import uuid
 from typing import Optional
 
@@ -164,16 +166,39 @@ def _extract_bond_data_from_frame(frame: bytes) -> Optional[bytes]:
     _DATA_SECTION = b'\x00\x53\x75'
     idx = frame.find(_DATA_SECTION)
     if idx != -1:
+        logger.debug(
+            "Bond data-section descriptor found at offset %d in %d-byte frame",
+            idx,
+            len(frame),
+        )
         pos = idx + 3
         if pos < len(frame):
             prefix = frame[pos]; pos += 1
             if prefix == 0xa0 and pos < len(frame):      # vbin8
                 length = frame[pos]; pos += 1
-                return frame[pos:pos + length]
+                extracted = frame[pos:pos + length]
+                logger.debug("Extracted vbin8 Bond payload: %d bytes", len(extracted))
+                return extracted
             if prefix == 0xb0 and pos + 4 <= len(frame):  # vbin32
                 length = struct.unpack_from('>I', frame, pos)[0]
                 pos += 4
-                return frame[pos:pos + length]
+                extracted = frame[pos:pos + length]
+                logger.debug("Extracted vbin32 Bond payload: %d bytes", len(extracted))
+                return extracted
+            logger.debug(
+                "Unrecognised Bond prefix byte 0x%02x at offset %d; "
+                "frame hex (first 64 bytes): %s",
+                prefix,
+                pos - 1,
+                frame[:64].hex(),
+            )
+    else:
+        logger.debug(
+            "Bond data-section descriptor not found in %d-byte frame; "
+            "falling back to raw frame. Hex (first 64 bytes): %s",
+            len(frame),
+            frame[:64].hex(),
+        )
     return frame if len(frame) > 8 else None
 
 
@@ -191,18 +216,49 @@ def parse_playlist_bond(bond_bytes: bytes) -> list[dict]:
     Returns a list of dicts with keys 'wait_time_ms', 'asset_id', 'version_id'.
     """
     results: list[dict] = []
+    logger.debug("Parsing Bond payload: %d bytes", len(bond_bytes))
     try:
+        t0 = time.monotonic()
         top, _ = _parse_bond_struct_v2(bond_bytes, 0)
+        logger.debug(
+            "Top-level Bond struct parsed in %.3fs; field ordinals present: %s",
+            time.monotonic() - t0,
+            sorted(top.keys()),
+        )
         containers = top.get(51)
         if not isinstance(containers, list):
-            logger.debug("Field 51 not found or is not a list in Bond response")
+            logger.debug(
+                "Field 51 not found or is not a list in Bond response "
+                "(type=%s, value=%r)",
+                type(containers).__name__,
+                containers,
+            )
             return results
 
-        for container_list in containers:
+        logger.debug(
+            "Field 51 is a list with %d outer element(s)", len(containers)
+        )
+        for outer_idx, container_list in enumerate(containers):
             if not isinstance(container_list, list):
+                logger.debug(
+                    "Outer element %d is not a list (type=%s); skipping",
+                    outer_idx,
+                    type(container_list).__name__,
+                )
                 continue
-            for entry in container_list:
+            logger.debug(
+                "Outer element %d has %d playlist container(s)",
+                outer_idx,
+                len(container_list),
+            )
+            for inner_idx, entry in enumerate(container_list):
                 if not isinstance(entry, dict):
+                    logger.debug(
+                        "Inner element [%d][%d] is not a dict (type=%s); skipping",
+                        outer_idx,
+                        inner_idx,
+                        type(entry).__name__,
+                    )
                     continue
                 wait_time_s = entry.get(2, 0.0)
                 info = entry.get(3)
@@ -213,9 +269,35 @@ def parse_playlist_bond(bond_bytes: bytes) -> list[dict]:
                     asset_guid = info.get(1)
                     if isinstance(asset_guid, dict):
                         asset_id = _bond_guid_to_str(asset_guid)
+                        logger.debug(
+                            "Resolved asset GUID [%d][%d]: %s", outer_idx, inner_idx, asset_id
+                        )
+                    else:
+                        logger.debug(
+                            "Asset GUID field (1) not a dict at [%d][%d]: type=%s value=%r",
+                            outer_idx,
+                            inner_idx,
+                            type(asset_guid).__name__,
+                            asset_guid,
+                        )
                     version_guid = info.get(2)
                     if isinstance(version_guid, dict):
                         version_id = _bond_guid_to_str(version_guid)
+                        logger.debug(
+                            "Resolved version GUID [%d][%d]: %s",
+                            outer_idx,
+                            inner_idx,
+                            version_id,
+                        )
+                else:
+                    logger.debug(
+                        "PlaylistInformation field (3) not a dict at [%d][%d]: "
+                        "type=%s value=%r",
+                        outer_idx,
+                        inner_idx,
+                        type(info).__name__,
+                        info,
+                    )
 
                 if isinstance(wait_time_s, (int, float)) and wait_time_s >= 0:
                     results.append({
@@ -223,8 +305,23 @@ def parse_playlist_bond(bond_bytes: bytes) -> list[dict]:
                         "asset_id": asset_id,
                         "version_id": version_id,
                     })
+                    logger.debug(
+                        "Entry [%d][%d]: asset_id=%s wait_time_ms=%d",
+                        outer_idx,
+                        inner_idx,
+                        asset_id,
+                        int(wait_time_s * 1000),
+                    )
+                else:
+                    logger.debug(
+                        "Skipping entry [%d][%d]: invalid wait_time_s=%r",
+                        outer_idx,
+                        inner_idx,
+                        wait_time_s,
+                    )
     except Exception as exc:
         logger.warning("Error parsing playlist Bond data: %s", exc)
+    logger.debug("Bond parsing complete: %d playlist entries extracted", len(results))
     return results
 
 
@@ -319,7 +416,22 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
         List of dicts with keys ``asset_id``, ``version_id``, ``wait_time_ms``.
         Returns an empty list on any failure.
     """
+    # ── Token validation logging ─────────────────────────────────────────────
+    if not spartan_token:
+        logger.error("spartan_token is empty; aborting WebSocket connection")
+        return []
+    if not clearance_token:
+        logger.error("clearance_token is empty; aborting WebSocket connection")
+        return []
+
+    logger.debug(
+        "Token validation: spartan_token length=%d, clearance_token length=%d",
+        len(spartan_token),
+        len(clearance_token),
+    )
+
     if not spartan_token.startswith("v4="):
+        logger.debug("Prepending 'v4=' prefix to spartan_token")
         spartan_token = f"v4={spartan_token}"
 
     headers = {
@@ -332,10 +444,10 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
     }
 
     playlist_entries: list[dict] = []
-    logger.debug("Connecting to lobby WebSocket at %s", LOBBY_WS_URL)
+    logger.info("Connecting to lobby WebSocket at %s (timeout=%ds)", LOBBY_WS_URL, WS_TIMEOUT)
+    t_connect_start = time.monotonic()
 
     try:
-        import asyncio
         async with asyncio.timeout(WS_TIMEOUT):
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(
@@ -343,46 +455,108 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
                     protocols=["AMQPWSB10"],
                     headers=headers,
                 ) as ws:
-                    logger.debug("Sending AMQP bootstrap (header + OPEN + BEGIN)")
+                    t_connected = time.monotonic()
+                    logger.info(
+                        "WebSocket connected in %.3fs; starting AMQP bootstrap",
+                        t_connected - t_connect_start,
+                    )
+
+                    # ── Step 1: Bootstrap ────────────────────────────────────
+                    logger.debug("Sending AMQP protocol header")
                     await ws.send_bytes(_AMQP_PROTOCOL_HEADER)
+                    logger.debug("Sending AMQP OPEN performative")
                     await ws.send_bytes(_encode_amqp_open())
+                    logger.debug("Sending AMQP BEGIN performative")
                     await ws.send_bytes(_encode_amqp_begin())
+                    logger.info("AMQP bootstrap sent (header + OPEN + BEGIN); waiting for server frames")
 
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.BINARY:
                             data: bytes = msg.data
-                            logger.debug("Received binary frame: %d bytes", len(data))
+                            logger.debug(
+                                "Binary frame received: %d bytes; hex prefix: %s",
+                                len(data),
+                                data[:16].hex(),
+                            )
 
                             if data[:4] == b"AMQP":
-                                logger.debug("Skipping AMQP protocol header echo")
+                                logger.debug(
+                                    "Skipping AMQP protocol header echo (%d bytes)", len(data)
+                                )
                                 continue
 
                             frame_class = _classify_amqp_frame(data)
 
+                            if frame_class is None:
+                                logger.debug(
+                                    "Frame could not be classified (unrecognised or too short); "
+                                    "hex (first 32 bytes): %s",
+                                    data[:32].hex(),
+                                )
+                                continue
+
+                            logger.debug(
+                                "Frame classified as descriptor 0x%s",
+                                frame_class.hex(),
+                            )
+
                             if frame_class == _AMQP_DESC_BEGIN:
-                                logger.debug("Server BEGIN received; sending ATTACH")
+                                # ── Step 2: Attach ───────────────────────────
+                                logger.info("Server BEGIN received; sending ATTACH")
                                 await ws.send_bytes(_encode_amqp_attach())
 
                             elif frame_class == _AMQP_DESC_ATTACH:
-                                logger.debug("Server ATTACH received; sending FLOW")
+                                # ── Step 3: Flow ─────────────────────────────
+                                logger.info("Server ATTACH received; sending FLOW (link_credit=1)")
                                 await ws.send_bytes(_encode_amqp_flow())
 
                             elif frame_class == _AMQP_DESC_TRANSFER:
-                                logger.debug("TRANSFER received; extracting Bond payload")
+                                # ── Step 4: Receive playlist data ─────────────
+                                t_transfer = time.monotonic()
+                                logger.info(
+                                    "TRANSFER frame received (%d bytes); extracting Bond payload",
+                                    len(data),
+                                )
                                 bond_bytes = _extract_bond_data_from_frame(data)
                                 if bond_bytes is not None:
+                                    logger.debug(
+                                        "Bond payload ready for parsing: %d bytes", len(bond_bytes)
+                                    )
                                     entries = parse_playlist_bond(bond_bytes)
                                     if entries:
                                         logger.info(
-                                            "Parsed %d playlist entries from Bond message",
+                                            "Parsed %d playlist entries from Bond message "
+                                            "(%.3fs after TRANSFER)",
                                             len(entries),
+                                            time.monotonic() - t_transfer,
                                         )
                                         playlist_entries.extend(entries)
                                         try:
                                             await ws.close()
+                                            logger.debug("WebSocket closed by client after receiving data")
                                         except Exception:
                                             pass
                                         break
+                                    else:
+                                        logger.warning(
+                                            "Bond payload parsed but yielded 0 entries; "
+                                            "Bond hex (first 64 bytes): %s",
+                                            bond_bytes[:64].hex(),
+                                        )
+                                else:
+                                    logger.warning(
+                                        "Bond payload extraction returned None for %d-byte frame; "
+                                        "frame hex (first 64 bytes): %s",
+                                        len(data),
+                                        data[:64].hex(),
+                                    )
+
+                            else:
+                                logger.debug(
+                                    "Unhandled AMQP frame descriptor 0x%s (%d bytes); ignoring",
+                                    frame_class.hex(),
+                                    len(data),
+                                )
 
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             logger.error("WebSocket error: %s", ws.exception())
@@ -390,14 +564,34 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
                         elif msg.type == aiohttp.WSMsgType.CLOSED:
                             logger.info("WebSocket closed by server")
                             break
+                        else:
+                            logger.debug("Unexpected WebSocket message type: %s", msg.type)
 
     except TimeoutError:
-        logger.error("WebSocket connection timed out after %ds", WS_TIMEOUT)
+        logger.error(
+            "WebSocket connection timed out after %ds (elapsed: %.3fs)",
+            WS_TIMEOUT,
+            time.monotonic() - t_connect_start,
+        )
     except aiohttp.ClientConnectorError as exc:
-        logger.error("Cannot connect to lobby WebSocket: %s", exc)
+        logger.error(
+            "Cannot connect to lobby WebSocket at %s: %s", LOBBY_WS_URL, exc
+        )
     except aiohttp.WSServerHandshakeError as exc:
         logger.error("WebSocket handshake failed (status %s): %s", exc.status, exc)
     except Exception as exc:
         logger.exception("Unexpected error fetching playlist wait times: %s", exc)
 
+    total_elapsed = time.monotonic() - t_connect_start
+    if playlist_entries:
+        logger.info(
+            "fetch_raw_playlist_entries complete: %d entries in %.3fs",
+            len(playlist_entries),
+            total_elapsed,
+        )
+    else:
+        logger.warning(
+            "fetch_raw_playlist_entries finished with 0 entries (elapsed %.3fs)",
+            total_elapsed,
+        )
     return playlist_entries

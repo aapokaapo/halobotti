@@ -13,6 +13,7 @@ WAIT_TIMES_RETENTION_DAYS Number of days to keep historical records (default: 30
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -36,6 +37,7 @@ _RETENTION_DAYS: int = int(os.environ.get("WAIT_TIMES_RETENTION_DAYS", "30"))
 
 async def _save_wait_time_records(entries: list[dict], name_map: dict[str, str]) -> None:
     """Persist *entries* as :class:`PlaylistWaitTimeRecord` rows."""
+    logger.debug("Saving %d wait time record(s) to database", len(entries))
     now = datetime.utcnow()
     async with Session(engine, expire_on_commit=False) as session:
         for entry in entries:
@@ -50,10 +52,12 @@ async def _save_wait_time_records(entries: list[dict], name_map: dict[str, str])
             )
             session.add(record)
         await session.commit()
+    logger.debug("Saved %d wait time record(s) successfully", len(entries))
 
 
 async def _upsert_playlist_info(entries: list[dict], name_map: dict[str, str]) -> None:
     """Insert or update :class:`PlaylistInfo` metadata rows."""
+    logger.debug("Upserting playlist info for %d entry/entries", len(entries))
     now = datetime.utcnow()
     async with Session(engine, expire_on_commit=False) as session:
         for entry in entries:
@@ -61,11 +65,13 @@ async def _upsert_playlist_info(entries: list[dict], name_map: dict[str, str]) -
             name = name_map.get(asset_id) or asset_id
             existing = await session.get(PlaylistInfo, asset_id)
             if existing:
+                logger.debug("Updating existing PlaylistInfo for asset_id=%s (%s)", asset_id, name)
                 existing.version_id = entry["version_id"]
                 existing.playlist_name = name
                 existing.last_seen = now
                 session.add(existing)
             else:
+                logger.debug("Inserting new PlaylistInfo for asset_id=%s (%s)", asset_id, name)
                 session.add(PlaylistInfo(
                     asset_id=asset_id,
                     version_id=entry["version_id"],
@@ -73,11 +79,13 @@ async def _upsert_playlist_info(entries: list[dict], name_map: dict[str, str]) -
                     last_seen=now,
                 ))
         await session.commit()
+    logger.debug("Playlist info upsert complete")
 
 
 async def _purge_old_records(retention_days: int) -> int:
     """Delete records older than *retention_days* days; return deleted count."""
     cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    logger.debug("Purging wait time records older than %s (retention=%d days)", cutoff, retention_days)
     async with Session(engine, expire_on_commit=False) as session:
         statement = select(PlaylistWaitTimeRecord).where(
             PlaylistWaitTimeRecord.recorded_at < cutoff
@@ -87,6 +95,8 @@ async def _purge_old_records(retention_days: int) -> int:
         for record in old_records:
             await session.delete(record)
         await session.commit()
+        if old_records:
+            logger.debug("Purged %d old wait time record(s)", len(old_records))
         return len(old_records)
 
 
@@ -167,24 +177,36 @@ async def _resolve_names(entries: list[dict]) -> dict[str, str]:
     Returns a dict mapping asset_id → playlist_name.
     """
     name_map: dict[str, str] = {}
+    logger.debug("Resolving names for %d playlist entry/entries", len(entries))
     try:
         async for client in spnkr_app.get_client():
             for entry in entries:
                 asset_id = entry["asset_id"]
                 version_id = entry["version_id"]
                 if not asset_id or asset_id in name_map:
+                    logger.debug(
+                        "Skipping name resolution for asset_id=%r (empty or already resolved)",
+                        asset_id,
+                    )
                     continue
+                logger.debug(
+                    "Resolving name for asset_id=%s version_id=%s", asset_id, version_id
+                )
                 try:
                     resp = await client.discovery_ugc.get_playlist(asset_id, version_id)
                     playlist = await resp.parse()
                     name = getattr(playlist, "public_name", None) or asset_id
                     name_map[asset_id] = name
+                    logger.debug("Resolved asset_id=%s → %r", asset_id, name)
                 except Exception as exc:
                     logger.warning("Could not resolve name for %s: %s", asset_id, exc)
                     name_map[asset_id] = asset_id
             break
     except Exception as exc:
         logger.error("Failed to obtain spnkr client for name resolution: %s", exc)
+    logger.debug(
+        "Name resolution complete: %d/%d asset IDs resolved", len(name_map), len(entries)
+    )
     return name_map
 
 
@@ -207,6 +229,7 @@ class WaitTimesApp(commands.Cog):
         self._retention_days = _RETENTION_DAYS
         self._last_poll: Optional[datetime] = None
         self._poll_error_count: int = 0
+        self._poll_count: int = 0
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -239,9 +262,16 @@ class WaitTimesApp(commands.Cog):
 
     async def _do_poll(self) -> None:
         """Fetch wait times, persist to DB, and purge old records."""
-        logger.info("Polling Halo Infinite playlist wait times…")
+        self._poll_count += 1
+        t_poll_start = time.monotonic()
+        logger.info(
+            "Starting poll #%d for Halo Infinite playlist wait times",
+            self._poll_count,
+        )
+
+        # ── Step 1: Refresh tokens ───────────────────────────────────────────
+        logger.debug("Step 1/5: Refreshing player tokens via spnkr_app.get_client()")
         try:
-            # Ensure tokens are fresh
             async for _ in spnkr_app.get_client():
                 break
         except Exception as exc:
@@ -249,31 +279,80 @@ class WaitTimesApp(commands.Cog):
             self._poll_error_count += 1
             return
 
+        # ── Step 2: Validate tokens ──────────────────────────────────────────
+        logger.debug("Step 2/5: Validating player_cache tokens")
         if spnkr_app.player_cache is None or not spnkr_app.player_cache.is_valid:
-            logger.error("No valid player tokens available for poll")
+            logger.error(
+                "No valid player tokens available for poll "
+                "(player_cache=%s, is_valid=%s)",
+                spnkr_app.player_cache,
+                getattr(spnkr_app.player_cache, "is_valid", "N/A"),
+            )
             self._poll_error_count += 1
             return
 
         spartan_token = spnkr_app.player_cache.spartan_token.token
         clearance_token = spnkr_app.player_cache.clearance_token.token
+        logger.debug(
+            "Tokens valid: spartan_token length=%d, clearance_token length=%d",
+            len(spartan_token),
+            len(clearance_token),
+        )
 
-        entries = await fetch_raw_playlist_entries(spartan_token, clearance_token)
+        # ── Step 3: Fetch raw entries via WebSocket ──────────────────────────
+        logger.debug("Step 3/5: Fetching raw playlist entries via AMQP WebSocket")
+        t_fetch = time.monotonic()
+        try:
+            entries = await fetch_raw_playlist_entries(spartan_token, clearance_token)
+        except Exception as exc:
+            logger.error(
+                "Unexpected error from fetch_raw_playlist_entries: %s", exc, exc_info=True
+            )
+            self._poll_error_count += 1
+            self._last_poll = datetime.utcnow()
+            return
+        logger.debug(
+            "fetch_raw_playlist_entries returned %d entry/entries in %.3fs",
+            len(entries),
+            time.monotonic() - t_fetch,
+        )
 
         if not entries:
-            logger.warning("Poll returned no playlist entries")
-            self._poll_error_count += 1
-        else:
-            self._poll_error_count = 0
-            name_map = await _resolve_names(entries)
-            await _save_wait_time_records(entries, name_map)
-            await _upsert_playlist_info(entries, name_map)
-            deleted = await _purge_old_records(self._retention_days)
-            logger.info(
-                "Poll complete: %d entries stored, %d old records purged",
-                len(entries),
-                deleted,
+            logger.warning(
+                "Poll returned no playlist entries (elapsed %.3fs so far)",
+                time.monotonic() - t_poll_start,
             )
+            self._poll_error_count += 1
+            self._last_poll = datetime.utcnow()
+            return
 
+        self._poll_error_count = 0
+
+        # ── Step 4: Resolve human-readable names ─────────────────────────────
+        logger.debug("Step 4/5: Resolving playlist names for %d entries", len(entries))
+        t_names = time.monotonic()
+        name_map = await _resolve_names(entries)
+        logger.debug(
+            "Name resolution complete in %.3fs: %s",
+            time.monotonic() - t_names,
+            {k: v for k, v in name_map.items()},
+        )
+
+        # ── Step 5: Persist to database ───────────────────────────────────────
+        logger.debug("Step 5/5: Persisting results to database")
+        t_db = time.monotonic()
+        await _save_wait_time_records(entries, name_map)
+        await _upsert_playlist_info(entries, name_map)
+        deleted = await _purge_old_records(self._retention_days)
+        logger.debug("Database operations completed in %.3fs", time.monotonic() - t_db)
+
+        total_elapsed = time.monotonic() - t_poll_start
+        logger.info(
+            "Poll complete in %.3fs: %d entries stored, %d old records purged",
+            total_elapsed,
+            len(entries),
+            deleted,
+        )
         self._last_poll = datetime.utcnow()
 
     # ── Discord commands ──────────────────────────────────────────────────────
