@@ -2,6 +2,7 @@ from sqlmodel import SQLModel, create_engine, select
 from sqlmodel.ext.asyncio.session import AsyncSession as Session
 from sqlalchemy.ext.asyncio import create_async_engine
 from .models import *
+from app.models.playlist import PlaylistWaitTimeRecord, PlaylistInfo  # noqa: F401 – registers tables
 
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 
