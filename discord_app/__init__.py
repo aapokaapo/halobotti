@@ -203,6 +203,54 @@ async def rank(ctx, gamertag: str):
             await paginator.respond(message, ephemeral=True)
     
     
+async def fetch_playlist_wait_times():
+    url = "https://halostats.343industries.com/api/v1/playlist-info"
+    try:
+        async with ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+    except Exception as e:
+        print(f"Virhe odotusaikojen haussa: {e}")
+        return None
+
+
+@bot.command(description="Hae Ranked Arena -pelilistauksen odotusaika")
+async def wait_time(ctx):
+    message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
+    data = await fetch_playlist_wait_times()
+
+    if data is None:
+        await message.edit_original_response(content="Virhe: Odotusaikoja ei voitu hakea")
+        return
+
+    ranked_arena = None
+    for playlist in data.get("playlists", []):
+        if "ranked arena" in playlist.get("name", "").lower():
+            ranked_arena = playlist
+            break
+
+    if ranked_arena is None:
+        await message.edit_original_response(content="Virhe: Ranked Arena -pelilistaa ei löydy")
+        return
+
+    wait_seconds = ranked_arena.get("averageWaitTime", 0) / 1000
+    minutes = int(wait_seconds // 60)
+    seconds = int(wait_seconds % 60)
+
+    embed = discord.Embed(
+        title="Ranked Arena Odotusaika",
+        description=f"**{minutes}m {seconds}s**",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Pelilistaus", value=ranked_arena.get("name", "Ranked Arena"))
+    embed.add_field(name="Tila", value="🟢 Online" if ranked_arena.get("isEnabled") else "🔴 Offline")
+    embed.set_footer(text="HaloBotti 2.0 by AapoKaapo", icon_url="https://halofin.land/HaloFinland.png")
+
+    await message.edit_original_response(content="", embed=embed)
+
+
 @bot.command(description="Sets the text channel as log channel")
 @discord.default_permissions(administrator=True)
 async def set_log_channel(ctx, channel_id: Optional[int]=None):
