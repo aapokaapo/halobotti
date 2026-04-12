@@ -25,6 +25,8 @@ DISCORD_COLORS = {
 MATPLOTLIB_FIGSIZE_GRAPH = (10, 5)
 MATPLOTLIB_FONT_SIZE = 12
 MATPLOTLIB_TITLE_SIZE = 14
+# x-position (in axis-fraction coordinates) for rank labels: just past the right edge
+RANK_LABEL_X_POSITION = 1.01
 
 
 def _configure_matplotlib_style() -> None:
@@ -158,7 +160,7 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         if y_min <= csr <= y_max:
             ax.axhline(y=csr, linestyle='dotted', color=color, linewidth=1)
             ax.text(
-                1.01, csr, rank.title(),
+                RANK_LABEL_X_POSITION, csr, rank.title(),
                 color=color,
                 fontsize=10,
                 verticalalignment='center',
