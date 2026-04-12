@@ -13,29 +13,10 @@ from discord_app.embeds import (
     create_rank_embed,
     create_series_info,
 )
+from discord_app.lobby import fetch_playlist_wait_times
 from spnkr_app import fetch_player_match_data, fetch_player_match_skills, get_client, get_xbl_profiles
 
 bot = discord.Bot()
-
-
-async def fetch_playlist_wait_times() -> Optional[dict]:
-    """Fetch wait times for Halo Infinite playlists from the Halo Waypoint API.
-
-    Uses the authenticated Spartan token session to call the proper endpoint.
-    Returns a dict with playlist data, or None on failure.
-    """
-    url = "https://gamecms-hacs.svc.halowaypoint.com/hi/multiplayer/file/MatchmakerWaitTimes.json"
-    try:
-        # get_client() yields exactly once, providing an authenticated session
-        # with X-343-Authorization-Spartan already set on the session headers.
-        async for client in get_client():
-            async with client._session.get(url) as response:
-                if response.status == 200:
-                    return await response.json()
-                return None
-    except Exception as e:
-        print(f"Virhe odotusaikojen haussa: {e}")
-        return None
 
 
 class PublishView(discord.ui.View):
@@ -104,23 +85,22 @@ async def rank(ctx, gamertag: str) -> None:
 async def wait_time(ctx) -> None:
     """Näytä Ranked Arena -pelilistauksen arvioitu odotusaika."""
     message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
-    data = await fetch_playlist_wait_times()
+    wait_times = await fetch_playlist_wait_times()
 
-    if data is None:
+    if not wait_times:
         await message.edit_original_response(content="Virhe: Odotusaikoja ei voitu hakea")
         return
 
-    ranked_arena = None
-    for playlist in data.get("playlists", []):
-        if "ranked arena" in playlist.get("name", "").lower():
-            ranked_arena = playlist
-            break
+    ranked_name = next(
+        (name for name in wait_times if "ranked arena" in name.lower()), None
+    )
 
-    if ranked_arena is None:
+    if ranked_name is None:
         await message.edit_original_response(content="Virhe: Ranked Arena -pelilistaa ei löydy")
         return
 
-    wait_seconds = ranked_arena.get("averageWaitTime", 0) / 1000
+    wait_ms = wait_times[ranked_name]
+    wait_seconds = wait_ms / 1000
     minutes = int(wait_seconds // 60)
     seconds = int(wait_seconds % 60)
 
@@ -129,8 +109,9 @@ async def wait_time(ctx) -> None:
         description=f"**{minutes}m {seconds}s**",
         color=discord.Color.blue()
     )
-    embed.add_field(name="Pelilistaus", value=ranked_arena.get("name", "Ranked Arena"))
-    embed.add_field(name="Tila", value="🟢 Online" if ranked_arena.get("isEnabled") else "🔴 Offline")
+    embed.add_field(name="Pelilistaus", value=ranked_name)
+    # The Bond PlaylistResponse schema only exposes WaitTime and asset identifiers;
+    # the isEnabled / online-status field is not present in the lobby WebSocket data.
     embed.set_footer(text="HaloBotti 2.0 by AapoKaapo", icon_url="https://halofin.land/HaloFinland.png")
 
     await message.edit_original_response(content="", embed=embed)
