@@ -25,6 +25,8 @@ DISCORD_COLORS = {
 MATPLOTLIB_FIGSIZE_GRAPH = (10, 5)
 MATPLOTLIB_FONT_SIZE = 12
 MATPLOTLIB_TITLE_SIZE = 14
+# x-position (in axis-fraction coordinates) for rank labels: just past the right edge
+RANK_LABEL_X_POSITION = 1.01
 
 
 def _configure_matplotlib_style() -> None:
@@ -42,7 +44,7 @@ def _configure_matplotlib_style() -> None:
 def _save_figure_to_buffer() -> io.BytesIO:
     """Save the current matplotlib figure to a BytesIO buffer and close it."""
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
     buf.seek(0)
     plt.close()
     return buf
@@ -135,10 +137,6 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         alpha=0.2
     )
 
-    # Labels and title
-    ax.set_xlabel("Match Number", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
-    ax.set_ylabel("CSR", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
-    ax.set_title("CSR Progression Over Matches", fontsize=MATPLOTLIB_TITLE_SIZE, color=DISCORD_COLORS['text'])
     ax.legend(facecolor=DISCORD_COLORS['bg'], edgecolor=DISCORD_COLORS['text'], fontsize=10)
 
     # Grid styling
@@ -161,7 +159,14 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         color = info['color']
         if y_min <= csr <= y_max:
             ax.axhline(y=csr, linestyle='dotted', color=color, linewidth=1)
-            ax.text(matches[0] + 0.5, csr, rank.title(), color=color, fontsize=10, verticalalignment='center')
+            ax.text(
+                RANK_LABEL_X_POSITION, csr, rank.title(),
+                color=color,
+                fontsize=10,
+                verticalalignment='center',
+                transform=ax.get_yaxis_transform(),
+                clip_on=False,
+            )
 
     return _save_figure_to_buffer()
 
