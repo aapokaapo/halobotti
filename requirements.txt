@@ -3,3 +3,4 @@ spnkr==0.9.5
 sqlmodel==0.0.22
 aiosqlite==0.21.0
 matplotlib==3.10.0
+python-dotenv==1.0.1
