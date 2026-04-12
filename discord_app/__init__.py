@@ -2,7 +2,6 @@ import time
 from typing import Optional
 
 import discord
-from aiohttp import ClientSession
 from discord import Interaction
 from discord.ext.pages import Page, Paginator
 from spnkr.tools import LIFECYCLE_MAP
@@ -20,14 +19,17 @@ bot = discord.Bot()
 
 
 async def fetch_playlist_wait_times() -> Optional[dict]:
-    """Fetch wait times for Halo Infinite playlists from the 343 Industries API.
+    """Fetch wait times for Halo Infinite playlists from the Halo Waypoint API.
 
+    Uses the authenticated Spartan token session to call the proper endpoint.
     Returns a dict with playlist data, or None on failure.
     """
-    url = "https://halostats.343industries.com/api/v1/playlist-info"
+    url = "https://gamecms-hacs.svc.halowaypoint.com/hi/multiplayer/file/MatchmakerWaitTimes.json"
     try:
-        async with ClientSession() as session:
-            async with session.get(url) as response:
+        # get_client() yields exactly once, providing an authenticated session
+        # with X-343-Authorization-Spartan already set on the session headers.
+        async for client in get_client():
+            async with client._session.get(url) as response:
                 if response.status == 200:
                     return await response.json()
                 return None
