@@ -28,52 +28,108 @@ async def get_map_image(map_asset):
 
     return map_image_url
 
+ranks = {
+    'onyx': {'csr': 1500, 'color': '#800080'},  # Purple
+    'diamond 6': {'csr': 1450, 'color': '#00BFFF'},  # Sky Blue
+    'diamond 5': {'csr': 1400, 'color': '#00BFFF'},
+    'diamond 4': {'csr': 1350, 'color': '#00BFFF'},
+    'diamond 3': {'csr': 1300, 'color': '#00BFFF'},
+    'diamond 2': {'csr': 1250, 'color': '#00BFFF'},
+    'diamond 1': {'csr': 1200, 'color': '#00BFFF'},
+    'platinum 6': {'csr': 1150, 'color': '#C0C0C0'},  # Silver
+    'platinum 5': {'csr': 1100, 'color': '#C0C0C0'},
+    'platinum 4': {'csr': 1050, 'color': '#C0C0C0'},
+    'platinum 3': {'csr': 1000, 'color': '#C0C0C0'},
+    'platinum 2': {'csr': 950, 'color': '#C0C0C0'},
+    'platinum 1': {'csr': 900, 'color': '#C0C0C0'},
+    'gold 6': {'csr': 850, 'color': '#FFD700'},  # Gold
+    'gold 5': {'csr': 800, 'color': '#FFD700'},
+    'gold 4': {'csr': 750, 'color': '#FFD700'},
+    'gold 3': {'csr': 700, 'color': '#FFD700'},
+    'gold 2': {'csr': 650, 'color': '#FFD700'},
+    'gold 1': {'csr': 600, 'color': '#FFD700'},
+    'silver 6': {'csr': 550, 'color': '#B0C4DE'},  # Light Steel Blue
+    'silver 5': {'csr': 500, 'color': '#B0C4DE'},
+    'silver 4': {'csr': 450, 'color': '#B0C4DE'},
+    'silver 3': {'csr': 400, 'color': '#B0C4DE'},
+    'silver 2': {'csr': 350, 'color': '#B0C4DE'},
+    'silver 1': {'csr': 300, 'color': '#B0C4DE'},
+    'bronze 6': {'csr': 250, 'color': '#CD7F32'},  # Bronze
+    'bronze 5': {'csr': 200, 'color': '#CD7F32'},
+    'bronze 4': {'csr': 150, 'color': '#CD7F32'},
+    'bronze 3': {'csr': 100, 'color': '#CD7F32'},
+    'bronze 2': {'csr': 50, 'color': '#CD7F32'},
+    'bronze 1': {'csr': 0, 'color': '#CD7F32'}
+}
 
-async def generate_csr_graph(player, match_skills):
+
+async def generate_csr_graph(player, match_skills) -> io.BytesIO:
+    """Generate CSR progression line chart with rank thresholds."""
     # Extract CSR values from match_skills
-    csr_values = []
-    for match_skill in match_skills:
-        for player_skill in match_skill.value:
-            if player_skill.id == wrap_xuid(player.xuid):
-                csr_values.append(player_skill.result.rank_recap.post_match_csr.value)
-    num_matches = len(csr_values)
+    csr_values = [
+        player_skill.result.rank_recap.post_match_csr.value
+        for match_skill in match_skills
+        for player_skill in match_skill.value
+        if player_skill.id == wrap_xuid(player.xuid)
+    ]
 
-    # Reverse match indices
+    if not csr_values:
+        return None
+
+    num_matches = len(csr_values)
     matches = list(range(num_matches, 0, -1))
 
     # Matplotlib styling to match Discord theme
-    plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(8, 4))
+    _configure_matplotlib_style()
+    fig, ax = plt.subplots(figsize=MATPLOTLIB_FIGSIZE_GRAPH)
 
     # Plot the CSR progression
-    ax.plot(matches, csr_values, marker='o', linestyle='-', color='#7289DA', markersize=6, label="CSR")
-    ax.fill_between(matches, csr_values, min(csr_values)-10, color='#7289DA', alpha=0.2)
+    ax.plot(
+        matches,
+        csr_values,
+        marker='o',
+        linestyle='-',
+        color=DISCORD_COLORS['header'],
+        markersize=6,
+        label="CSR"
+    )
+    ax.fill_between(
+        matches,
+        csr_values,
+        min(csr_values) - 10,
+        color=DISCORD_COLORS['header'],
+        alpha=0.2
+    )
 
     # Labels and title
-    ax.set_xlabel("Match Number", fontsize=12, color='white')
-    ax.set_ylabel("CSR", fontsize=12, color='white')
-    ax.set_title("CSR Progression Over Matches", fontsize=14, color='white')
-    ax.legend(facecolor='#2C2F33', edgecolor='white', fontsize=10)
+    ax.set_xlabel("Match Number", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
+    ax.set_ylabel("CSR", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
+    ax.set_title("CSR Progression Over Matches", fontsize=MATPLOTLIB_TITLE_SIZE, color=DISCORD_COLORS['text'])
+    ax.legend(facecolor=DISCORD_COLORS['bg'], edgecolor=DISCORD_COLORS['text'], fontsize=10)
 
     # Grid styling
     ax.grid(color='#555', linestyle='dashed', linewidth=0.5, alpha=0.5)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('white')
-    ax.spines['bottom'].set_color('white')
-    ax.tick_params(axis='both', colors='white')
+    ax.spines['left'].set_color(DISCORD_COLORS['text'])
+    ax.spines['bottom'].set_color(DISCORD_COLORS['text'])
+    ax.tick_params(axis='both', colors=DISCORD_COLORS['text'])
 
     # Set x-axis increments to 2
     ax.set_xticks(range(num_matches, 0, -2))
 
-    # Save to BytesIO
-    img_buf = io.BytesIO()
-    plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True)
-    img_buf.seek(0)
-    plt.close()
+    # Determine visible y-range
+    y_min, y_max = ax.get_ylim()
 
-    return img_buf  # Return BytesIO object for Discord upload
+    # Add horizontal dotted lines for ranks within range
+    for rank, info in ranks.items():
+        csr = info['csr']
+        color = info['color']
+        if y_min <= csr <= y_max:
+            ax.axhline(y=csr, linestyle='dotted', color=color, linewidth=1)
+            ax.text(matches[0] + 0.5, csr, rank.title(), color=color, fontsize=10, verticalalignment='center')
 
+    return _save_figure_to_buffer()
 
 async def create_discord_table_image(data: List[str|int|float], columns: List[str]):
     """Generates a Discord-styled table image with a dark theme and modern styling."""

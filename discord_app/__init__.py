@@ -15,6 +15,67 @@ from aiohttp import ClientSession
 
 bot = discord.Bot()
 
+import aiohttp
+import json
+
+# Add this function to fetch wait times from the Halo Infinite playlist API
+async def fetch_playlist_wait_times():
+    """
+    Fetch wait times for Halo Infinite playlists.
+    Returns a dict with playlist names and their wait times.
+    """
+    url = "https://halostats.343industries.com/api/v1/playlist-info"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                else:
+                    return None
+    except Exception as e:
+        print(f"Error fetching wait times: {e}")
+        return None
+
+
+# Add this command to your bot
+@bot.command(description="Get Ranked Arena playlist wait time")
+async def ranked_arena_wait(ctx):
+    message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
+    
+    wait_times = await fetch_playlist_wait_times()
+    
+    if wait_times is None:
+        await message.edit(content="Virhe: Ei voitu hakea odotusaikoja")
+        return
+    
+    # Find Ranked Arena playlist in the response
+    ranked_arena = None
+    for playlist in wait_times.get("playlists", []):
+        if "ranked arena" in playlist.get("name", "").lower():
+            ranked_arena = playlist
+            break
+    
+    if ranked_arena:
+        wait_time = ranked_arena.get("averageWaitTime", 0)
+        # Convert milliseconds to seconds
+        wait_seconds = wait_time / 1000
+        minutes = int(wait_seconds // 60)
+        seconds = int(wait_seconds % 60)
+        
+        embed = discord.Embed(
+            title="Ranked Arena Odotusaika",
+            description=f"**{minutes}m {seconds}s**",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Playlist", value=ranked_arena.get("name", "Ranked Arena"))
+        embed.add_field(name="Status", value="🟢 Online" if ranked_arena.get("isEnabled") else "🔴 Offline")
+        
+        await message.edit(embed=embed)
+    else:
+        await message.edit(content="Virhe: Ranked Arena-pelilistaa ei löydy")
+
 
 class PublishView(discord.ui.View):
     def __init__(self):
