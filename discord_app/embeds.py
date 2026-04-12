@@ -135,10 +135,6 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         alpha=0.2
     )
 
-    # Labels and title
-    ax.set_xlabel("Match Number", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
-    ax.set_ylabel("CSR", fontsize=MATPLOTLIB_FONT_SIZE, color=DISCORD_COLORS['text'])
-    ax.set_title("CSR Progression Over Matches", fontsize=MATPLOTLIB_TITLE_SIZE, color=DISCORD_COLORS['text'])
     ax.legend(facecolor=DISCORD_COLORS['bg'], edgecolor=DISCORD_COLORS['text'], fontsize=10)
 
     # Grid styling
@@ -161,7 +157,14 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         color = info['color']
         if y_min <= csr <= y_max:
             ax.axhline(y=csr, linestyle='dotted', color=color, linewidth=1)
-            ax.text(matches[0] + 0.5, csr, rank.title(), color=color, fontsize=10, verticalalignment='center')
+            ax.text(
+                1.01, csr, rank.title(),
+                color=color,
+                fontsize=10,
+                verticalalignment='center',
+                transform=ax.get_yaxis_transform(),
+                clip_on=False,
+            )
 
     return _save_figure_to_buffer()
 
