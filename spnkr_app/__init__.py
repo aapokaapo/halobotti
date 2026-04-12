@@ -6,11 +6,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.tokens import AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI, AZURE_REFRESH_TOKEN
 from aiohttp import ClientSession, ClientResponseError
-from spnkr import HaloInfiniteClient, AzureApp, refresh_player_tokens, authenticate_player
+from spnkr import HaloInfiniteClient, AzureApp, refresh_player_tokens
 from spnkr.models.stats import MatchStats
 from spnkr.models.discovery_ugc import Asset, Map, UgcGameVariant
 from spnkr.models.profile import User
-from typing import List, Dict, Literal, Optional
+from typing import List, Optional
 from pydantic import BaseModel
 import time
 from database_app.database import get_player_by_xuid, add_custom_player
@@ -18,7 +18,6 @@ from database_app.models import CustomPlayer
 from spnkr.tools import unwrap_xuid, BOT_MAP
 from spnkr.film import HighlightEvent, read_highlight_events
 
-RANKED_PLAYLIST = "edfef3ac-9cbe-4fa2-b949-8f29deafd483"
 
 
 player_cache = None  # Global cache for the player instance
@@ -261,7 +260,6 @@ async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_
         print("match_history took %f ms" % ((end_time - start_time) * 1000.0))
         profile = await get_xbl_profiles(client, gamertag)
         skill_tasks = []
-        custom_match_tasks = []
         for match_history_result in match_history:
             match_stats = await get_match_stats(client, match_history_result.match_id)
             match_skill = get_match_skills(client, match_history_result.match_id, match_stats.xuids)
@@ -272,52 +270,3 @@ async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_
 
         return match_skills
 
-
-async def get_profile(gamertag: str|int):
-    async for client in get_client():
-        resp = await client.profile.get_user_by_gamertag(gamertag)
-        profile = await resp.parse()
-
-        return profile
-
-
-async def generate_spartan_tokens(AZURE_REFRESH_TOKEN) -> None:
-    app = AzureApp(AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI)
-
-    async with ClientSession() as session:
-        player = await refresh_player_tokens(session, app, AZURE_REFRESH_TOKEN)
-        print(f"Spartan token: {player.spartan_token.token}")  # Valid for 4 hours.
-        print(f"Clearance token: {player.clearance_token.token}")
-        print(f"Xbox Live player ID (XUID): {player.player_id}")
-        print(f"Xbox Live gamertag: {player.gamertag}")
-        print(f"Xbox Live authorization: {player.xbl_authorization_header_value}")
-
-        client = HaloInfiniteClient(
-            session=session,
-            spartan_token=f"{player.spartan_token.token}",
-            clearance_token=f"{player.clearance_token.token}",
-            # Optional, default rate is 5.
-            requests_per_second=5,
-        )
-        PLAYER = "AapoKaapo"
-        # Request the 25 most recent matches for the player.
-        resp = await client.stats.get_match_history(PLAYER)
-        # Parse the response JSON into a Pydantic model
-        history = await resp.parse()
-
-        # Get the most recent match played and print the start time.
-        last_match_info = history.results[0].match_info
-        print(f"Last match played on {last_match_info.start_time:%Y-%m-%d}")
-
-
-async def generate_tokens() -> None:
-    app = AzureApp(AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI)
-
-    async with ClientSession() as session:
-        AZURE_REFRESH_TOKEN = await authenticate_player(session, app)
-        print(f"Your refresh token is:\n{AZURE_REFRESH_TOKEN}")
-        await generate_spartan_tokens(AZURE_REFRESH_TOKEN)
-
-
-if __name__ == "__main__":
-    asyncio.run(generate_tokens())
