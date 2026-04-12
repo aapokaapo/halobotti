@@ -132,7 +132,7 @@ async def _get_playlist_stats(asset_id: str, hours: int = 24) -> Optional[dict]:
     wait_times = [r.wait_time_ms for r in records]
     avg_ms = sum(wait_times) / len(wait_times)
     min_ms = min(wait_times)
-    max_ms = min(wait_times)
+    max_ms = max(wait_times)
 
     # Simple trend: compare first half average to second half average
     mid = len(records) // 2
