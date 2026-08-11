@@ -89,7 +89,7 @@ async def wait_time(ctx) -> None:
     message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
 
     # Try the DB cache populated by the background polling loop first.
-    cached = await wait_times_app._get_latest_wait_times()
+    cached = await wait_times_app.get_latest_wait_times()
     ranked_record = next(
         (r for r in cached if "ranked arena" in (r.playlist_name or "").lower()),
         None,
@@ -99,7 +99,9 @@ async def wait_time(ctx) -> None:
         wait_ms = ranked_record.wait_time_ms
         minutes = int(wait_ms // 60000)
         seconds = int((wait_ms % 60000) // 1000)
-        age = datetime.now(timezone.utc) - ranked_record.recorded_at.replace(tzinfo=timezone.utc)
+        # recorded_at is stored as a naive UTC datetime (datetime.utcnow())
+        recorded_utc = ranked_record.recorded_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - recorded_utc
         age_str = f"{int(age.total_seconds() // 60)}min sitten" if age.total_seconds() >= 60 else "juuri nyt"
 
         embed = discord.Embed(

@@ -113,6 +113,16 @@ async def _get_latest_wait_times() -> list[PlaylistWaitTimeRecord]:
         return latest
 
 
+async def get_latest_wait_times() -> list[PlaylistWaitTimeRecord]:
+    """Return the most recent :class:`PlaylistWaitTimeRecord` for every known playlist.
+
+    Public wrapper around :func:`_get_latest_wait_times` intended for use by
+    other modules that want read access to the cached wait time data without
+    depending on internal implementation details.
+    """
+    return await _get_latest_wait_times()
+
+
 async def _get_playlist_stats(asset_id: str, hours: int = 24) -> Optional[dict]:
     """Return aggregated wait time statistics for a playlist over the last *hours*."""
     since = datetime.utcnow() - timedelta(hours=hours)
