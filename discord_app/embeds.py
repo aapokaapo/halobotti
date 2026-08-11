@@ -435,6 +435,7 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
 
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Breakdown")
+    match_embed.description = "Legend: first value is actual in-game, value in brackets is expected."
     match_embed.set_footer(
         text="HaloBotti 2.0 by AapoKaapo",
         icon_url="https://halofin.land/HaloFinland.png",
@@ -477,7 +478,7 @@ async def create_match_skill_embed(profiles, match_skill):
         current_csr = rank_recap.pre_match_csr.value
 
         value_lines = [
-            f"K/D: {actual_kills}/{actual_deaths} ({kd_ratio:.2f}) | exp K/D: {exp_kills}/{exp_deaths}",
+            f"K/D: {actual_kills} ({exp_kills}) / {actual_deaths} ({exp_deaths}) KD:{kd_ratio:.2f}",
             f"Kills: {act_kills_rank} ({exp_kills_rank}) | Deaths: {act_deaths_rank} ({exp_deaths_rank})",
             f"CSR: {current_csr} | MMR: {estimated_tier} | perf: {performance_tier}",
         ]
