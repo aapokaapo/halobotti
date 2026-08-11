@@ -434,17 +434,47 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
 
 
 async def create_match_skill_embed(profiles, match_skill):
-    match_embed = Embed(title="Match Skill Embed")
-    for player in sorted(match_skill.value, key=lambda player: player.result.team_id):
+    match_embed = Embed(title="⚔️ Match Skill Breakdown")
+    match_embed.set_footer(
+        text="HaloBotti 2.0 by AapoKaapo",
+        icon_url="https://halofin.land/HaloFinland.png",
+    )
+
+    current_team_id = None
+    for player in sorted(match_skill.value, key=lambda p: p.result.team_id):
+        team_id = player.result.team_id
+
+        # Insert a team header separator when the team changes
+        if team_id != current_team_id:
+            current_team_id = team_id
+            team_label = TEAM_MAP.get(team_id, f"Team {team_id}")
+            match_embed.add_field(name=f"── {team_label} ──", value="", inline=False)
+
         profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
+        gamertag = profile.gamertag if profile else str(player.id)
+
         self_counterfactuals = player.result.counterfactuals.self_counterfactuals
         tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
 
-        expected_kills, expected_deaths = await find_closest_rank(self_counterfactuals, tier_counterfactuals)
-        actual_kills, actual_deaths = player.result.stat_performances.kills.count, player.result.stat_performances.deaths.count
+        actual_kills = player.result.stat_performances.kills.count
+        actual_deaths = player.result.stat_performances.deaths.count
+        kd_ratio = actual_kills / actual_deaths if actual_deaths > 0 else float(actual_kills)
+
         estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
-        performance_tier = await estimate_tier(Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals)
-        match_embed.add_field(name=f"{profile.gamertag}", value=f"Kills:{actual_kills}, Deaths:{actual_deaths}\nHidden MMR: {estimated_tier}\nRank based on Performance: {performance_tier}", inline=False)
+        performance_tier = await estimate_tier(
+            Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals
+        )
+        expected_kills_rank, expected_deaths_rank = await find_closest_rank(
+            self_counterfactuals, tier_counterfactuals
+        )
+
+        value_lines = [
+            f"**K / D:** {actual_kills} / {actual_deaths}  (K/D: {kd_ratio:.2f})",
+            f"**Hidden MMR:** {estimated_tier}",
+            f"**Performance rank:** {performance_tier}",
+            f"**Expected rank by kills:** {expected_kills_rank}  |  **by deaths:** {expected_deaths_rank}",
+        ]
+        match_embed.add_field(name=f"🎮 {gamertag}", value="\n".join(value_lines), inline=False)
 
     return match_embed
 
