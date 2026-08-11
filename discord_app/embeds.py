@@ -472,12 +472,11 @@ async def create_match_skill_embed(profiles, match_skill):
         )
 
         current_csr = rank_recap.pre_match_csr.value
-        post_csr = rank_recap.post_match_csr.value
 
         value_lines = [
             f"K/D: {actual_kills}/{actual_deaths} ({kd_ratio:.2f}) | exp K/D: {exp_kills}/{exp_deaths}",
             f"K-rank: {exp_kills_rank} | D-rank: {exp_deaths_rank}",
-            f"CSR: {current_csr} | MMR: {estimated_tier} | post: {post_csr} (perf: {performance_tier})",
+            f"CSR: {current_csr} | MMR: {estimated_tier} | perf: {performance_tier}",
         ]
         match_embed.add_field(name=gamertag, value="\n".join(value_lines), inline=False)
 
