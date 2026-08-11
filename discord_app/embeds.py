@@ -450,7 +450,93 @@ async def create_match_skill_embed(profiles, match_skill):
 
 
 async def create_rank_embed(player, match_skills):
-    rank_embed = Embed(title=f"Ranked progression of {player.gamertag}")
+    wrapped_xuid = wrap_xuid(player.xuid)
+
+    # Collect per-match data for the player
+    csr_values = []
+    outcomes = []
+    total_kills = 0
+    total_deaths = 0
+    match_count = 0
+
+    for match_skill in match_skills:
+        for player_skill in match_skill.value:
+            if player_skill.id != wrapped_xuid:
+                continue
+            recap = player_skill.result.rank_recap
+            csr_values.append(recap.post_match_csr.value)
+            # Determine outcome from CSR delta
+            delta = recap.post_match_csr.value - recap.pre_match_csr.value
+            if delta > 0:
+                outcomes.append("WIN")
+            elif delta < 0:
+                outcomes.append("LOSS")
+            else:
+                outcomes.append("TIE")
+            total_kills += player_skill.result.stat_performances.kills.count
+            total_deaths += player_skill.result.stat_performances.deaths.count
+            match_count += 1
+
+    wins = outcomes.count("WIN")
+    losses = outcomes.count("LOSS")
+    ties = outcomes.count("TIE")
+
+    current_csr = csr_values[0] if csr_values else None
+    oldest_csr = csr_values[-1] if csr_values else None
+    csr_trend = (current_csr - oldest_csr) if (current_csr is not None and oldest_csr is not None) else None
+
+    avg_kills = total_kills / match_count if match_count else 0
+    avg_deaths = total_deaths / match_count if match_count else 0
+    avg_kd = total_kills / total_deaths if total_deaths > 0 else float(total_kills)
+
+    # Estimate hidden MMR from the most recent match skill entry
+    hidden_mmr = None
+    for match_skill in match_skills:
+        for player_skill in match_skill.value:
+            if player_skill.id == wrapped_xuid:
+                self_cf = player_skill.result.counterfactuals.self_counterfactuals
+                tier_cf = player_skill.result.counterfactuals.tier_counterfactuals
+                hidden_mmr = await estimate_tier(self_cf, tier_cf)
+                break
+        if hidden_mmr is not None:
+            break
+
+    trend_str = ""
+    if csr_trend is not None:
+        trend_str = f"+{csr_trend}" if csr_trend >= 0 else str(csr_trend)
+
+    rank_embed = Embed(title=f"Ranked Progression — {player.gamertag}")
+
+    if current_csr is not None:
+        rank_embed.add_field(
+            name="Current CSR",
+            value=f"**{current_csr}** ({trend_str} over {match_count} matches)",
+            inline=False,
+        )
+
+    rank_embed.add_field(
+        name="W / L / T",
+        value=f"**{wins}** / **{losses}** / **{ties}**",
+        inline=True,
+    )
+    rank_embed.add_field(
+        name="Avg K/D",
+        value=f"**{avg_kd:.2f}** ({avg_kills:.1f} kills / {avg_deaths:.1f} deaths)",
+        inline=True,
+    )
+
+    if hidden_mmr is not None:
+        rank_embed.add_field(
+            name="Hidden MMR (est.)",
+            value=f"**{hidden_mmr}**",
+            inline=True,
+        )
+
+    rank_embed.set_footer(
+        text="HaloBotti 2.0 by AapoKaapo",
+        icon_url="https://halofin.land/HaloFinland.png",
+    )
+
     image = await generate_csr_graph(player, match_skills)
 
     random_uuid = uuid.uuid4()
