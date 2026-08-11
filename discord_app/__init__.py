@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import discord
@@ -15,6 +16,7 @@ from discord_app.embeds import (
 )
 from discord_app.lobby import fetch_playlist_wait_times
 from spnkr_app import fetch_player_match_data, fetch_player_match_skills, get_client, get_xbl_profiles
+import wait_times_app
 
 bot = discord.Bot()
 
@@ -85,6 +87,37 @@ async def rank(ctx, gamertag: str) -> None:
 async def wait_time(ctx) -> None:
     """Näytä Ranked Arena -pelilistauksen arvioitu odotusaika."""
     message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
+
+    # Try the DB cache populated by the background polling loop first.
+    cached = await wait_times_app.get_latest_wait_times()
+    ranked_record = next(
+        (r for r in cached if "ranked arena" in (r.playlist_name or "").lower()),
+        None,
+    )
+
+    if ranked_record is not None:
+        wait_ms = ranked_record.wait_time_ms
+        minutes = int(wait_ms // 60000)
+        seconds = int((wait_ms % 60000) // 1000)
+        # recorded_at is stored as a naive UTC datetime (datetime.utcnow())
+        recorded_utc = ranked_record.recorded_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - recorded_utc
+        age_str = f"{int(age.total_seconds() // 60)}min sitten" if age.total_seconds() >= 60 else "juuri nyt"
+
+        embed = discord.Embed(
+            title="Ranked Arena Odotusaika",
+            description=f"**{minutes}m {seconds}s**",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Pelilistaus", value=ranked_record.playlist_name)
+        embed.set_footer(
+            text=f"Päivitetty {age_str} | HaloBotti 2.0 by AapoKaapo",
+            icon_url="https://halofin.land/HaloFinland.png",
+        )
+        await message.edit_original_response(content="", embed=embed)
+        return
+
+    # No cached data yet – fall back to a live WebSocket fetch.
     wait_times = await fetch_playlist_wait_times()
 
     if not wait_times:
@@ -100,20 +133,19 @@ async def wait_time(ctx) -> None:
         return
 
     wait_ms = wait_times[ranked_name]
-    wait_seconds = wait_ms / 1000
-    minutes = int(wait_seconds // 60)
-    seconds = int(wait_seconds % 60)
+    minutes = int(wait_ms // 60000)
+    seconds = int((wait_ms % 60000) // 1000)
 
     embed = discord.Embed(
         title="Ranked Arena Odotusaika",
         description=f"**{minutes}m {seconds}s**",
-        color=discord.Color.blue()
+        color=discord.Color.blue(),
     )
     embed.add_field(name="Pelilistaus", value=ranked_name)
-    # The Bond PlaylistResponse schema only exposes WaitTime and asset identifiers;
-    # the isEnabled / online-status field is not present in the lobby WebSocket data.
-    embed.set_footer(text="HaloBotti 2.0 by AapoKaapo", icon_url="https://halofin.land/HaloFinland.png")
-
+    embed.set_footer(
+        text="HaloBotti 2.0 by AapoKaapo",
+        icon_url="https://halofin.land/HaloFinland.png",
+    )
     await message.edit_original_response(content="", embed=embed)
 
 
