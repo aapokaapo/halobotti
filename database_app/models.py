@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from email.policy import default
 from typing import List, Optional
 import uuid
