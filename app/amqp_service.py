@@ -23,13 +23,21 @@ logger = logging.getLogger(__name__)
 
 # ── WebSocket constants ──────────────────────────────────────────────────────
 LOBBY_WS_URL = "wss://lobby-hi.svc.halowaypoint.com/"
+LOBBY_WS_HOST = "lobby-hi.svc.halowaypoint.com"
 WS_TIMEOUT = 30  # seconds
 _AMQP_PROTOCOL_HEADER = b"AMQP\x00\x01\x00\x00"
+
+# AMQP source address for the playlist wait-time topic.  Set to the correct
+# queue/topic name if the server requires an explicit source address on ATTACH.
+# Community reverse-engineering suggests "v1/playlist-waittimes"; adjust if needed.
+LOBBY_AMQP_SOURCE: str = "v1/playlist-waittimes"
 
 # ── AMQP 1.0 performative descriptors (server → client) ─────────────────────
 _AMQP_DESC_BEGIN = b'\x00\x53\x11'    # server BEGIN    → we send ATTACH
 _AMQP_DESC_ATTACH = b'\x00\x53\x12'  # server ATTACH   → we send FLOW
 _AMQP_DESC_TRANSFER = b'\x00\x53\x14'  # server TRANSFER → Bond payload
+_AMQP_DESC_END = b'\x00\x53\x17'     # server END      → session closed
+_AMQP_DESC_CLOSE = b'\x00\x53\x18'   # server CLOSE    → connection closed
 
 # ── Bond CompactBinary wire types ────────────────────────────────────────────
 _BT_BOOL = 2
@@ -254,8 +262,14 @@ def _classify_amqp_frame(data: bytes) -> Optional[bytes]:
 
 
 def _encode_amqp_open(container_id: str = "halobotti") -> bytes:
-    """Encode an AMQP OPEN performative (descriptor 0x10)."""
-    items = _encode_str_amqp(container_id) + b'\x40' + b'\x70' + struct.pack('>I', 65536)
+    """Encode an AMQP OPEN performative (descriptor 0x10).
+
+    Includes the required *hostname* field so the server can route the
+    connection to the correct virtual container.
+    """
+    items = (_encode_str_amqp(container_id)
+             + _encode_str_amqp(LOBBY_WS_HOST)  # hostname (field 1) – required for routing
+             + b'\x70' + struct.pack('>I', 65536))  # max-frame-size (field 2)
     list_body = struct.pack('>I', 3) + items
     list_enc = b'\xd0' + struct.pack('>I', len(list_body)) + list_body
     return _make_amqp_frame(0, b'\x00\x53\x10' + list_enc)
@@ -273,14 +287,25 @@ def _encode_amqp_begin() -> bytes:
 
 
 def _encode_amqp_attach(name: str = "halobotti-wt") -> bytes:
-    """Encode an AMQP ATTACH performative (descriptor 0x12) for a receiver link."""
+    """Encode an AMQP ATTACH performative (descriptor 0x12) for a receiver link.
+
+    Sets the *source* address to :data:`LOBBY_AMQP_SOURCE` so the server knows
+    which queue/topic to read from.  Update that constant if the address changes.
+    """
+    # Source is a composite type: descriptor 0x00 0x53 0x28, then a list with the
+    # address string as the first (and only required) field.
+    src_addr = _encode_str_amqp(LOBBY_AMQP_SOURCE)
+    src_list_body = struct.pack('>I', 1) + src_addr
+    src_list_enc = b'\xd0' + struct.pack('>I', len(src_list_body)) + src_list_body
+    source = b'\x00\x53\x28' + src_list_enc
+
     items = (_encode_str_amqp(name)
-             + b'\x43'
-             + b'\x41'
-             + b'\x50\x02'
-             + b'\x50\x00'
-             + b'\x40'
-             + b'\x40')
+             + b'\x43'      # handle = uint(0)
+             + b'\x41'      # role   = true (receiver)
+             + b'\x50\x02'  # snd-settle-mode = mixed
+             + b'\x50\x00'  # rcv-settle-mode = first
+             + source       # source with address
+             + b'\x40')     # target = null
     list_body = struct.pack('>I', 7) + items
     list_enc = b'\xd0' + struct.pack('>I', len(list_body)) + list_body
     return _make_amqp_frame(0, b'\x00\x53\x12' + list_enc)
@@ -360,11 +385,11 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
                             frame_class = _classify_amqp_frame(data)
 
                             if frame_class == _AMQP_DESC_BEGIN:
-                                logger.debug("Server BEGIN received; sending ATTACH")
+                                logger.info("Server BEGIN received; sending ATTACH")
                                 await ws.send_bytes(_encode_amqp_attach())
 
                             elif frame_class == _AMQP_DESC_ATTACH:
-                                logger.debug("Server ATTACH received; sending FLOW")
+                                logger.info("Server ATTACH received; sending FLOW")
                                 await ws.send_bytes(_encode_amqp_flow())
 
                             elif frame_class == _AMQP_DESC_TRANSFER:
@@ -383,6 +408,25 @@ async def fetch_raw_playlist_entries(spartan_token: str, clearance_token: str) -
                                         except Exception:
                                             pass
                                         break
+
+                            elif frame_class == _AMQP_DESC_END:
+                                logger.warning(
+                                    "Server sent AMQP END (session closed); "
+                                    "frame: %s", data[:32].hex()
+                                )
+                                break
+
+                            elif frame_class == _AMQP_DESC_CLOSE:
+                                logger.warning(
+                                    "Server sent AMQP CLOSE (connection closed); "
+                                    "frame: %s", data[:32].hex()
+                                )
+                                break
+
+                            elif frame_class is not None:
+                                logger.debug(
+                                    "Unhandled AMQP performative %s", frame_class.hex()
+                                )
 
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             logger.error("WebSocket error: %s", ws.exception())
