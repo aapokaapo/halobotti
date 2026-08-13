@@ -49,7 +49,8 @@ async def startup():
 @bot.command(description="Hae pelaajan ranked-suoritus")
 async def rank(ctx, gamertag: str) -> None:
     """Näytä pelaajan CSR-eteneminen ja viimeiset ranked-matsit."""
-    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data", ephemeral=True)
+    await ctx.defer(ephemeral=True)
+    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data")
     try:
         async with get_client() as client:
             profile = await get_xbl_profiles(client, gamertag)
