@@ -70,8 +70,12 @@ async def rank(ctx, gamertag: str) -> None:
                 for value in match_skill.value:
                     xuids.append(value.id)
             profiles = await get_xbl_profiles(client, xuids)
-            for match_skill in match_skills:
-                page = Page(embeds=[await create_match_skill_embed(profiles, match_skill)])
+            for i, match_skill in enumerate(match_skills):
+                match_embed = await create_match_skill_embed(profiles, match_skill)
+                _, match_image = await create_rank_embed(profile[0], match_skills, highlight_index=i)
+                filename = f"csr_graph_match_{i + 1}.png"
+                match_embed.set_image(url=f"attachment://{filename}")
+                page = Page(embeds=[match_embed], files=[discord.File(match_image, filename)])
                 pages.append(page)
             custom_view = PublishView()
 

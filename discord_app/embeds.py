@@ -97,8 +97,15 @@ ranks = {
 }
 
 
-async def generate_csr_graph(player, match_skills) -> io.BytesIO:
-    """Generate CSR progression line chart with rank thresholds."""
+async def generate_csr_graph(player, match_skills, highlight_index: int | None = None) -> io.BytesIO:
+    """Generate CSR progression line chart with rank thresholds.
+
+    Parameters
+    ----------
+    highlight_index:
+        If provided, draws a vertical dashed line and a highlighted marker on
+        the match at this position in *match_skills* (0 = most recent match).
+    """
     # Extract CSR values from match_skills
     csr_values = [
         player_skill.result.rank_recap.post_match_csr.value
@@ -134,6 +141,21 @@ async def generate_csr_graph(player, match_skills) -> io.BytesIO:
         color=DISCORD_COLORS['header'],
         alpha=0.2
     )
+
+    # Highlight the specific match if requested
+    if highlight_index is not None and 0 <= highlight_index < num_matches:
+        hx = matches[highlight_index]
+        hy = csr_values[highlight_index]
+        ax.axvline(x=hx, linestyle='--', color='#FF6B6B', linewidth=1.5, alpha=0.8)
+        ax.plot(hx, hy, marker='o', markersize=12, color='#FF6B6B', zorder=5)
+        ax.annotate(
+            f"Match {highlight_index + 1}",
+            xy=(hx, hy),
+            xytext=(8, 8),
+            textcoords='offset points',
+            color='#FF6B6B',
+            fontsize=9,
+        )
 
     ax.legend(facecolor=DISCORD_COLORS['bg'], edgecolor=DISCORD_COLORS['text'], fontsize=10)
 
@@ -538,7 +560,7 @@ async def create_match_skill_embed(profiles, match_skill):
     return match_embed
 
 
-async def create_rank_embed(player, match_skills):
+async def create_rank_embed(player, match_skills, highlight_index: int | None = None):
     wrapped_xuid = wrap_xuid(player.xuid)
 
     # Collect per-match data for the player
@@ -626,6 +648,6 @@ async def create_rank_embed(player, match_skills):
         icon_url="https://halofin.land/HaloFinland.png",
     )
 
-    image = await generate_csr_graph(player, match_skills)
+    image = await generate_csr_graph(player, match_skills, highlight_index=highlight_index)
 
     return rank_embed, image
