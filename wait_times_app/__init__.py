@@ -250,40 +250,41 @@ class WaitTimesApp(commands.Cog):
         """Fetch wait times, persist to DB, and purge old records."""
         logger.info("Polling Halo Infinite playlist wait times…")
         try:
-            # Ensure tokens are fresh
-            async with spnkr_app.get_client():
-                pass
-        except Exception as exc:
-            logger.error("Token refresh failed during poll: %s", exc)
-            self._poll_error_count += 1
-            return
+            try:
+                # Ensure tokens are fresh
+                async with spnkr_app.get_client():
+                    pass
+            except Exception as exc:
+                logger.error("Token refresh failed during poll: %s", exc)
+                self._poll_error_count += 1
+                return
 
-        if spnkr_app.player_cache is None or not spnkr_app.player_cache.is_valid:
-            logger.error("No valid player tokens available for poll")
-            self._poll_error_count += 1
-            return
+            if spnkr_app.player_cache is None or not spnkr_app.player_cache.is_valid:
+                logger.error("No valid player tokens available for poll")
+                self._poll_error_count += 1
+                return
 
-        spartan_token = spnkr_app.player_cache.spartan_token.token
-        clearance_token = spnkr_app.player_cache.clearance_token.token
+            spartan_token = spnkr_app.player_cache.spartan_token.token
+            clearance_token = spnkr_app.player_cache.clearance_token.token
 
-        entries = await fetch_raw_playlist_entries(spartan_token, clearance_token)
+            entries = await fetch_raw_playlist_entries(spartan_token, clearance_token)
 
-        if not entries:
-            logger.warning("Poll returned no playlist entries")
-            self._poll_error_count += 1
-        else:
-            self._poll_error_count = 0
-            name_map = await _resolve_names(entries)
-            await _save_wait_time_records(entries, name_map)
-            await _upsert_playlist_info(entries, name_map)
-            deleted = await _purge_old_records(self._retention_days)
-            logger.info(
-                "Poll complete: %d entries stored, %d old records purged",
-                len(entries),
-                deleted,
-            )
-
-        self._last_poll = datetime.utcnow()
+            if not entries:
+                logger.warning("Poll returned no playlist entries")
+                self._poll_error_count += 1
+            else:
+                self._poll_error_count = 0
+                name_map = await _resolve_names(entries)
+                await _save_wait_time_records(entries, name_map)
+                await _upsert_playlist_info(entries, name_map)
+                deleted = await _purge_old_records(self._retention_days)
+                logger.info(
+                    "Poll complete: %d entries stored, %d old records purged",
+                    len(entries),
+                    deleted,
+                )
+        finally:
+            self._last_poll = datetime.utcnow()
 
     # ── Discord commands ──────────────────────────────────────────────────────
 
