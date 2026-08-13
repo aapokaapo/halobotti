@@ -62,8 +62,9 @@ async def rank(ctx, gamertag: str) -> None:
             print("match_skills took %f ms" % ((end_time - start_time) * 1000.0))
             pages = []
             xuids = []
-            embed, files = await create_rank_embed(profile[0], match_skills)
-            summary_page = Page(embeds=[embed], files=files)
+            embed, image = await create_rank_embed(profile[0], match_skills)
+            await ctx.followup.send(file=discord.File(image, "csr_graph.png"), ephemeral=True)
+            summary_page = Page(embeds=[embed])
             pages.append(summary_page)
             for match_skill in match_skills:
                 for value in match_skill.value:

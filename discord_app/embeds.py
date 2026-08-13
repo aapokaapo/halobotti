@@ -628,10 +628,4 @@ async def create_rank_embed(player, match_skills):
 
     image = await generate_csr_graph(player, match_skills)
 
-    random_uuid = uuid.uuid4()
-    rank_embed.set_image(url=f"attachment://{random_uuid}.png")
-    files = [
-        File(image, f"{random_uuid}.png")
-    ]
-
-    return rank_embed, files
+    return rank_embed, image
