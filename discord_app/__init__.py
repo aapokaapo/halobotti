@@ -33,6 +33,10 @@ class PublishView(discord.ui.View):
     async def callback(self, button, interaction):
         if self.paginator:
             self.paginator.custom_view = None
+            for page in self.paginator.pages:
+                for f in (page.files or []):
+                    if hasattr(f.fp, "seek"):
+                        f.fp.seek(0)
             await self.paginator.respond(interaction)
 
         elif self.message:
@@ -159,7 +163,6 @@ class SeriesPaginator(Paginator):
         super().__init__(*args, **kwargs)
 
     async def on_timeout(self):
-        await self.goto_page(0)
         await super().on_timeout()
 
 
