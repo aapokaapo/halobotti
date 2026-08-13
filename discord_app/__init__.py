@@ -49,12 +49,12 @@ async def startup():
 @bot.command(description="Hae pelaajan ranked-suoritus")
 async def rank(ctx, gamertag: str) -> None:
     """Näytä pelaajan CSR-eteneminen ja viimeiset ranked-matsit."""
-    message = await ctx.respond(f"Haetaan pelaajan {gamertag} data", ephemeral=True)
+    await ctx.defer(ephemeral=True)
     try:
         async with get_client() as client:
             profile = await get_xbl_profiles(client, gamertag)
             if not profile:
-                await message.edit_original_response(content=f"Virhe: Pelaajaa '{gamertag}' ei löydy")
+                await ctx.followup.send(f"Virhe: Pelaajaa '{gamertag}' ei löydy", ephemeral=True)
                 return
             start_time = time.time()
             match_skills = await fetch_player_match_skills(profile[0].gamertag, count=20)
@@ -77,16 +77,16 @@ async def rank(ctx, gamertag: str) -> None:
             paginator = SeriesPaginator(pages=pages)
             custom_view.add_paginator(paginator)
             paginator.custom_view = custom_view
-            await paginator.respond(message, ephemeral=True)
+            await paginator.respond(ctx.interaction, ephemeral=True)
     except Exception as e:
         print(f"Virhe rank-komennossa: {e}")
-        await message.edit_original_response(content="Virhe: Ranked-datan hakeminen epäonnistui")
+        await ctx.followup.send("Virhe: Ranked-datan hakeminen epäonnistui", ephemeral=True)
 
 
 @bot.command(description="Hae Ranked Arena -pelilistauksen odotusaika")
 async def wait_time(ctx) -> None:
     """Näytä Ranked Arena -pelilistauksen arvioitu odotusaika."""
-    message = await ctx.respond("Haetaan Ranked Arena odotusaikaa...", ephemeral=True)
+    await ctx.defer(ephemeral=True)
 
     # Try the DB cache populated by the background polling loop first.
     cached = await wait_times_app.get_latest_wait_times()
@@ -114,14 +114,14 @@ async def wait_time(ctx) -> None:
             text=f"Päivitetty {age_str} | HaloBotti 2.0 by AapoKaapo",
             icon_url="https://halofin.land/HaloFinland.png",
         )
-        await message.edit_original_response(content="", embed=embed)
+        await ctx.followup.send(embed=embed, ephemeral=True)
         return
 
     # No cached data yet – fall back to a live WebSocket fetch.
     wait_times = await fetch_playlist_wait_times()
 
     if not wait_times:
-        await message.edit_original_response(content="Virhe: Odotusaikoja ei voitu hakea")
+        await ctx.followup.send("Virhe: Odotusaikoja ei voitu hakea", ephemeral=True)
         return
 
     ranked_name = next(
@@ -129,7 +129,7 @@ async def wait_time(ctx) -> None:
     )
 
     if ranked_name is None:
-        await message.edit_original_response(content="Virhe: Ranked Arena -pelilistaa ei löydy")
+        await ctx.followup.send("Virhe: Ranked Arena -pelilistaa ei löydy", ephemeral=True)
         return
 
     wait_ms = wait_times[ranked_name]
@@ -146,7 +146,7 @@ async def wait_time(ctx) -> None:
         text="HaloBotti 2.0 by AapoKaapo",
         icon_url="https://halofin.land/HaloFinland.png",
     )
-    await message.edit_original_response(content="", embed=embed)
+    await ctx.followup.send(embed=embed, ephemeral=True)
 
 
 class SeriesPaginator(Paginator):
@@ -194,8 +194,9 @@ class MatchSelect(discord.ui.Select):
 
 
 class SeriesView(discord.ui.View):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, match_select: MatchSelect):
+        super().__init__()
+        self.add_item(match_select)
 
     async def on_timeout(self):
         try:
@@ -207,15 +208,14 @@ class SeriesView(discord.ui.View):
 @bot.command(description="Luo yhteenveto pelatuista matseista")
 async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Optional[int] = 0, match_type: str = "all") -> None:
     """Hae pelaajan matsit ja luo niistä sarjayhteenveto valintanäkymällä."""
-    msg = await ctx.respond(content="Haetaan matseja...", ephemeral=True)
+    await ctx.defer(ephemeral=True)
     try:
         match_history = await fetch_player_match_data(gamertag, start=start, count=count, match_type=match_type)
         if not match_history:
-            await msg.edit_original_response(content="Virhe: Matseja ei löydy annetuilla hakuehdoilla")
+            await ctx.followup.send("Virhe: Matseja ei löydy annetuilla hakuehdoilla", ephemeral=True)
             return
-        await msg.edit_original_response(content=f"Haetaan matseja... ({len(match_history)}/{count})")
         select = MatchSelect(match_history)
-        await msg.edit_original_response(content="", view=SeriesView(select))
+        await ctx.followup.send(view=SeriesView(select), ephemeral=True)
     except Exception as e:
         print(f"Virhe make_series-komennossa: {e}")
-        await msg.edit_original_response(content="Virhe: Matsien hakeminen epäonnistui")
+        await ctx.followup.send("Virhe: Matsien hakeminen epäonnistui", ephemeral=True)
