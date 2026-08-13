@@ -178,7 +178,7 @@ async def _resolve_names(entries: list[dict]) -> dict[str, str]:
     """
     name_map: dict[str, str] = {}
     try:
-        async for client in spnkr_app.get_client():
+        async with spnkr_app.get_client() as client:
             for entry in entries:
                 asset_id = entry["asset_id"]
                 version_id = entry["version_id"]
@@ -192,7 +192,6 @@ async def _resolve_names(entries: list[dict]) -> dict[str, str]:
                 except Exception as exc:
                     logger.warning("Could not resolve name for %s: %s", asset_id, exc)
                     name_map[asset_id] = asset_id
-            break
     except Exception as exc:
         logger.error("Failed to obtain spnkr client for name resolution: %s", exc)
     return name_map
@@ -252,8 +251,8 @@ class WaitTimesApp(commands.Cog):
         logger.info("Polling Halo Infinite playlist wait times…")
         try:
             # Ensure tokens are fresh
-            async for _ in spnkr_app.get_client():
-                break
+            async with spnkr_app.get_client():
+                pass
         except Exception as exc:
             logger.error("Token refresh failed during poll: %s", exc)
             self._poll_error_count += 1

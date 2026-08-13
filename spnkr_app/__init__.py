@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 from spnkr.models.skill import MatchSkill
 from spnkr.xuid import wrap_xuid
@@ -22,6 +23,7 @@ from spnkr.film import HighlightEvent, read_highlight_events
 
 player_cache = None  # Global cache for the player instance
 
+@asynccontextmanager
 async def get_client():
     global player_cache
     app = AzureApp(AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, REDIRECT_URI)
@@ -215,7 +217,7 @@ async def create_custom_match(client, match_players, match_stats):
 
 
 async def fetch_player_match_data(gamertag: str|int, start=0, count=25, match_type="all"):
-    async for client in get_client():
+    async with get_client() as client:
         match_history = await get_match_history(client, gamertag, start, count, match_type)
         async_tasks =[]
         for match_history_result in match_history:
@@ -253,7 +255,7 @@ async def get_match_skills(client, match_id, xuids):
 
 
 async def fetch_player_match_skills(gamertag: str|int, start=0, count=25, match_type="ranked") -> List[MatchSkill]:
-    async for client in get_client():
+    async with get_client() as client:
         start_time = time.time()
         match_history = await get_match_history(client, gamertag, start, count, match_type)
         end_time = time.time()

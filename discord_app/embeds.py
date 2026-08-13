@@ -53,14 +53,12 @@ def _save_figure_to_buffer() -> io.BytesIO:
 async def get_map_image(map_asset) -> str:
     async with ClientSession() as session:
         map_image_url = map_asset.files.prefix + "images/thumbnail.jpg"
-        response = await session.get(map_image_url)
-
-        if response.status == 404:
-            map_image_url = map_asset.files.prefix + "images/thumbnail.png"
-            response = await session.get(map_image_url)
-
+        async with session.get(map_image_url) as response:
             if response.status == 404:
-                map_image_url = "https://img.freepik.com/premium-vector/default-image-icon-vector-missing-picture-page-website-design-mobile-app-no-photo-available_87543-11093.jpg"
+                map_image_url = map_asset.files.prefix + "images/thumbnail.png"
+                async with session.get(map_image_url) as response2:
+                    if response2.status == 404:
+                        map_image_url = "https://img.freepik.com/premium-vector/default-image-icon-vector-missing-picture-page-website-design-mobile-app-no-photo-available_87543-11093.jpg"
 
     return map_image_url
 
