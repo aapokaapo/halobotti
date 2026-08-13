@@ -215,7 +215,7 @@ async def make_series(ctx, gamertag: str, count: Optional[int] = 25, start: Opti
             await ctx.followup.send("Virhe: Matseja ei löydy annetuilla hakuehdoilla", ephemeral=True)
             return
         select = MatchSelect(match_history)
-        await ctx.followup.send(content="", view=SeriesView(select), ephemeral=True)
+        await ctx.followup.send(view=SeriesView(select), ephemeral=True)
     except Exception as e:
         print(f"Virhe make_series-komennossa: {e}")
         await ctx.followup.send("Virhe: Matsien hakeminen epäonnistui", ephemeral=True)
