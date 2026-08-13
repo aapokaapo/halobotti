@@ -103,8 +103,8 @@ async def generate_csr_graph(player, match_skills, highlight_index: int | None =
     Parameters
     ----------
     highlight_index:
-        If provided, draws a vertical dashed line and a highlighted marker on
-        the match at this position in *match_skills* (0 = most recent match).
+        If provided, draws a white dot marker on the match at this position
+        in *match_skills* (0 = most recent match).
     """
     # Extract CSR values from match_skills
     csr_values = [
@@ -146,14 +146,13 @@ async def generate_csr_graph(player, match_skills, highlight_index: int | None =
     if highlight_index is not None and 0 <= highlight_index < num_matches:
         hx = matches[highlight_index]
         hy = csr_values[highlight_index]
-        ax.axvline(x=hx, linestyle='--', color='#FF6B6B', linewidth=1.5, alpha=0.8)
-        ax.plot(hx, hy, marker='o', markersize=12, color='#FF6B6B', zorder=5)
+        ax.plot(hx, hy, marker='o', markersize=12, color='white', zorder=5)
         ax.annotate(
             f"Match {highlight_index + 1}",
             xy=(hx, hy),
             xytext=(8, 8),
             textcoords='offset points',
-            color='#FF6B6B',
+            color='white',
             fontsize=9,
         )
 
