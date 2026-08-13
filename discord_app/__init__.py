@@ -51,7 +51,7 @@ async def rank(ctx, gamertag: str) -> None:
     """Näytä pelaajan CSR-eteneminen ja viimeiset ranked-matsit."""
     message = await ctx.respond(f"Haetaan pelaajan {gamertag} data", ephemeral=True)
     try:
-        async for client in get_client():
+        async with get_client() as client:
             profile = await get_xbl_profiles(client, gamertag)
             if not profile:
                 await message.edit_original_response(content=f"Virhe: Pelaajaa '{gamertag}' ei löydy")
