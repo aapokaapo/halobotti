@@ -433,6 +433,45 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
     return closest_kills, closest_deaths
 
 
+def get_performance_rating(estimated_tier, performance_tier):
+    try:
+        diff = float(performance_tier) - float(estimated_tier)
+    except (ValueError, TypeError):
+        return "?"
+
+    # Assuming a scale where -200 is F, stepping by increments of 25-50
+    if diff >= 200.0:
+        return "SSS"
+    elif diff >= 150.0:
+        return "SS"
+    elif diff >= 100.0:
+        return "S"
+    elif diff >= 50.0:
+        return "A++"
+    elif diff > 0.0:
+        return "A+"
+    elif diff == 0.0:
+        return "A"
+    elif diff >= -25.0:
+        return "A-"
+    elif diff >= -50.0:
+        return "B+"
+    elif diff >= -75.0:
+        return "B"
+    elif diff >= -100.0:
+        return "B-"
+    elif diff >= -125.0:
+        return "C+"
+    elif diff >= -150.0:
+        return "C"
+    elif diff >= -175.0:
+        return "C-"
+    elif diff >= -200.0:
+        return "D"
+    else:
+        return "F"
+
+
 async def create_match_skill_embed(profiles, match_skill):
     match_embed = Embed(title="Match Skill Breakdown")
     match_embed.description = "Legend: first value is actual in-game, value in brackets is expected."
@@ -468,6 +507,10 @@ async def create_match_skill_embed(profiles, match_skill):
         performance_tier = await estimate_tier(
             Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals
         )
+        
+        # --- Fetch the performance rating from the new function ---
+        rating = get_performance_rating(estimated_tier, performance_tier)
+
         exp_kills_rank, exp_deaths_rank = await find_closest_rank(
             self_counterfactuals, tier_counterfactuals
         )
@@ -481,7 +524,7 @@ async def create_match_skill_embed(profiles, match_skill):
             f"KD:{kd_ratio:.2f}",
             f"K/D: {actual_kills} ({exp_kills}) / {actual_deaths} ({exp_deaths})",
             f"Kills: {act_kills_rank} ({exp_kills_rank}) | Deaths: {act_deaths_rank} ({exp_deaths_rank})",
-            f"CSR: {current_csr} | MMR: {estimated_tier} | perf: {performance_tier}",
+            f"CSR: {current_csr} | MMR: {estimated_tier} | perf: {performance_tier} [{rating}]",
         ]
         match_embed.add_field(name=gamertag, value="\n".join(value_lines), inline=False)
 
