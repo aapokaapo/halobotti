@@ -435,41 +435,109 @@ async def find_closest_rank(counterfactuals, tier_counterfactuals):
 
 def get_performance_rating(estimated_tier, performance_tier):
     try:
-        diff = float(performance_tier) - float(estimated_tier)
+        est = float(estimated_tier)
+        perf = float(performance_tier)
+        
+        # Prevent division by zero just in case
+        if est <= 0:
+            est = 1.0 
+            
+        # Calculate how much they over/underperformed as a percentage
+        percent_diff = ((perf - est) / est) * 100
+        
     except (ValueError, TypeError):
         return "?"
 
-    # Assuming a scale where -200 is F, stepping by increments of 25-50
-    if diff >= 200.0:
+    # 20% over/under performance used as the extreme bounds
+    if percent_diff >= 20.0:
         return "SSS"
-    elif diff >= 150.0:
+    elif percent_diff >= 15.0:
         return "SS"
-    elif diff >= 100.0:
+    elif percent_diff >= 10.0:
         return "S"
-    elif diff >= 50.0:
+    elif percent_diff >= 5.0:
         return "A++"
-    elif diff > 0.0:
+    elif percent_diff > 0.0:
         return "A+"
-    elif diff == 0.0:
+    elif percent_diff == 0.0:
         return "A"
-    elif diff >= -25.0:
+    elif percent_diff >= -2.5:
         return "A-"
-    elif diff >= -50.0:
+    elif percent_diff >= -5.0:
         return "B+"
-    elif diff >= -75.0:
+    elif percent_diff >= -7.5:
         return "B"
-    elif diff >= -100.0:
+    elif percent_diff >= -10.0:
         return "B-"
-    elif diff >= -125.0:
+    elif percent_diff >= -12.5:
         return "C+"
-    elif diff >= -150.0:
+    elif percent_diff >= -15.0:
         return "C"
-    elif diff >= -175.0:
+    elif percent_diff >= -17.5:
         return "C-"
-    elif diff >= -200.0:
+    elif percent_diff >= -20.0:
         return "D"
     else:
         return "F"
+
+
+async def create_match_skill_embed(profiles, match_skill):
+    match_embed = Embed(title="Match Skill Breakdown")
+    match_embed.description = "Legend: first value is actual in-game, value in brackets is expected."
+    match_embed.set_footer(
+        text="HaloBotti 2.0 by AapoKaapo",
+        icon_url="https://halofin.land/HaloFinland.png",
+    )
+
+    current_team_id = None
+    for player in sorted(match_skill.value, key=lambda p: p.result.team_id):
+        team_id = player.result.team_id
+
+        if team_id != current_team_id:
+            current_team_id = team_id
+            team_label = TEAM_MAP.get(team_id, f"Team {team_id}")
+            match_embed.add_field(name=f"── {team_label} ──", value="", inline=False)
+
+        profile = next((item for item in profiles if wrap_xuid(item.xuid) == player.id), None)
+        gamertag = profile.gamertag if profile else str(player.id)
+
+        self_counterfactuals = player.result.counterfactuals.self_counterfactuals
+        tier_counterfactuals = player.result.counterfactuals.tier_counterfactuals
+        rank_recap = player.result.rank_recap
+
+        actual_kills = player.result.stat_performances.kills.count
+        actual_deaths = player.result.stat_performances.deaths.count
+        kd_ratio = actual_kills / actual_deaths if actual_deaths > 0 else float(actual_kills)
+
+        exp_kills = round(self_counterfactuals.kills, 1)
+        exp_deaths = round(self_counterfactuals.deaths, 1)
+
+        estimated_tier = await estimate_tier(self_counterfactuals, tier_counterfactuals)
+        performance_tier = await estimate_tier(
+            Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals
+        )
+        
+        # --- Fetch the performance rating using the new percentage scaling ---
+        rating = get_performance_rating(estimated_tier, performance_tier)
+
+        exp_kills_rank, exp_deaths_rank = await find_closest_rank(
+            self_counterfactuals, tier_counterfactuals
+        )
+        act_kills_rank, act_deaths_rank = await find_closest_rank(
+            Counterfactual(kills=actual_kills, deaths=actual_deaths), tier_counterfactuals
+        )
+
+        current_csr = rank_recap.pre_match_csr.value
+
+        value_lines = [
+            f"KD:{kd_ratio:.2f}",
+            f"K/D: {actual_kills} ({exp_kills}) / {actual_deaths} ({exp_deaths})",
+            f"Kills: {act_kills_rank} ({exp_kills_rank}) | Deaths: {act_deaths_rank} ({exp_deaths_rank})",
+            f"CSR: {current_csr} | MMR: {estimated_tier} | perf: {performance_tier} [{rating}]",
+        ]
+        match_embed.add_field(name=gamertag, value="\n".join(value_lines), inline=False)
+
+    return match_embed
 
 
 async def create_match_skill_embed(profiles, match_skill):
